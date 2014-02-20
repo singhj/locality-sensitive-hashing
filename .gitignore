@@ -26,6 +26,8 @@ pip-log.txt
 .coverage
 .tox
 nosetests.xml
+twitter.xml
+twitter_settings.xml
 
 # Translations
 *.mo
@@ -34,7 +36,3 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
-
-.idea
-.
-..

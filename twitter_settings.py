@@ -1,0 +1,6 @@
+consumer_key = 'customer_key_09876r5etrdfgjhky786tyguho78yt'
+consumer_secret = 'customer_secret_uoi9i7t6r5yfghjby76tyghjtyghj'
+request_token_URL = 'https://api.twitter.com/oauth/request_token'
+authorize_URL = 'https://api.twitter.com/oauth/authorize'
+access_token_URL = 'https://api.twitter.com/oauth/access_token'
+callback_URL = 'https://gae-fb-canvas.appspot.com/twitter_callback'

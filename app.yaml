@@ -1,0 +1,32 @@
+application: gae-fb-canvas
+version: 1
+runtime: python27
+api_version: 1
+threadsafe: no
+
+handlers:
+- url: /stylesheets
+  static_dir: stylesheets
+
+- url: /favicon.ico
+  static_dir: static/images
+
+- url: /mapreduce/pipeline/images
+  static_dir: mapreduce/lib/pipeline/ui/images
+
+- url: /static/js/custom.js
+  static_files: static/js/custom.js
+  upload: static/js/custom.js
+
+- url: /mapreduce(/.*)?
+  script: mapreduce.main.APP
+
+- url: /.*
+  script: main.application
+  login: required
+
+libraries:
+- name: webapp2
+  version: latest
+- name: jinja2
+  version: latest
