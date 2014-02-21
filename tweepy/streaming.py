@@ -7,6 +7,7 @@ import httplib
 from socket import timeout
 from threading import Thread
 from time import sleep
+import ssl
 
 from tweepy.models import Status
 from tweepy.api import API
@@ -48,6 +49,14 @@ class StreamListener(object):
             delete = data['delete']['status']
             if self.on_delete(delete['id'], delete['user_id']) is False:
                 return False
+        elif 'event' in data:
+            status = Status.parse(self.api, data)
+            if self.on_event(status) is False:
+                return False
+        elif 'direct_message' in data:
+            status = Status.parse(self.api, data)
+            if self.on_direct_message(status) is False:
+                return False
         elif 'limit' in data:
             if self.on_limit(data['limit']['track']) is False:
                 return False
@@ -61,8 +70,20 @@ class StreamListener(object):
         """Called when a new status arrives"""
         return
 
+    def on_exception(self, exception):
+        """Called when an unhandled exception occurs."""
+        return
+
     def on_delete(self, status_id, user_id):
         """Called when a delete notice arrives for a status"""
+        return
+
+    def on_event(self, status):
+        """Called when a new event arrives"""
+        return
+
+    def on_direct_message(self, status):
+        """Called when a new direct message arrives"""
         return
 
     def on_limit(self, track):
@@ -150,7 +171,12 @@ class Stream(object):
                     self.snooze_time = self.snooze_time_step
                     self.listener.on_connect()
                     self._read_loop(resp)
-            except timeout:
+            except (timeout, ssl.SSLError), exc:
+                # If it's not time out treat it like any other exception
+                if isinstance(exc, ssl.SSLError) and not (exc.args and 'timed out' in str(exc.args[0])):
+                    exception = exc
+                    break
+
                 if self.listener.on_timeout() == False:
                     break
                 if self.running is False:
@@ -169,6 +195,8 @@ class Stream(object):
             conn.close()
 
         if exception:
+            # call a handler first so that the exception can be logged.
+            self.listener.on_exception(exception)
             raise
 
     def _data(self, data):
@@ -211,12 +239,26 @@ class Stream(object):
         """ Called when the response has been closed by Twitter """
         pass
 
-    def userstream(self, count=None, async=False, secure=True):
+    def userstream(self, stall_warnings=False, _with=None, replies=None,
+            track=None, locations=None, async=False, encoding='utf8'):
         self.parameters = {'delimited': 'length'}
         if self.running:
             raise TweepError('Stream object already connected!')
-        self.url = '/2/user.json?delimited=length'
+        self.url = '/%s/user.json?delimited=length' % STREAM_VERSION
         self.host='userstream.twitter.com'
+        if stall_warnings:
+            self.parameters['stall_warnings'] = stall_warnings
+        if _with:
+            self.parameters['with'] = _with
+        if replies:
+            self.parameters['replies'] = replies
+        if locations and len(locations) > 0:
+            assert len(locations) % 4 == 0
+            self.parameters['locations'] = ','.join(['%.2f' % l for l in locations])
+        if track:
+            encoded_track = [s.encode(encoding) for s in track]
+            self.parameters['track'] = ','.join(encoded_track)
+        self.body = urlencode_noplus(self.parameters)
         self._start(async)
 
     def firehose(self, count=None, async=False):
@@ -244,17 +286,19 @@ class Stream(object):
             self.url += '&count=%s' % count
         self._start(async)
 
-    def filter(self, follow=None, track=None, async=False, locations=None, 
-        count = None, stall_warnings=False, languages=None):
+    def filter(self, follow=None, track=None, async=False, locations=None,
+               count=None, stall_warnings=False, languages=None, encoding='utf8'):
         self.parameters = {}
         self.headers['Content-type'] = "application/x-www-form-urlencoded"
         if self.running:
             raise TweepError('Stream object already connected!')
         self.url = '/%s/statuses/filter.json?delimited=length' % STREAM_VERSION
         if follow:
-            self.parameters['follow'] = ','.join(map(str, follow))
+            encoded_follow = [s.encode(encoding) for s in follow]
+            self.parameters['follow'] = ','.join(encoded_follow)
         if track:
-            self.parameters['track'] = ','.join(map(str, track))
+            encoded_track = [s.encode(encoding) for s in track]
+            self.parameters['track'] = ','.join(encoded_track)
         if locations and len(locations) > 0:
             assert len(locations) % 4 == 0
             self.parameters['locations'] = ','.join(['%.2f' % l for l in locations])

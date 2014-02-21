@@ -11,7 +11,6 @@ class PublicTweets(session.BaseRequestHandler):
     def get(self):
         auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
         # Redirect user to Twitter to authorize
-        logging.info('reading tweets with %s', auth.str())
         url = auth.get_authorization_url()
         self.session['request_token_key'] = auth.request_token.key
         self.session['request_token_secret'] = auth.request_token.secret
