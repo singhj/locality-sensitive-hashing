@@ -37,6 +37,18 @@ Close() methods on instances of the class. Each stage class, in turn, provides a
 
 The code, especially the GetNext () method, makes heavy use of the `yield` command in Python. In case you are not familiar with it, [here is an explanation] (http://stackoverflow.com/questions/231767/the-python-yield-keyword-explained).
 
+The first implementation will be based on Google App Engine and written in Python. The data will be stored as shown:
+
+| Stage        | Data Storage for Results                                |
+|:-------------|:--------------------------------------------------------|
+| `mining`     | Blobstore                                               |
+| `filtering`  | Blobstore                                               |
+| `shingling`  | Blobstore                                               |
+| `minhash`    | Datastore                                               |
+| `LSH buckets`| Datastore                                               |
+| `matching`   | Datastore                                               |
+
+
 Implementation thus far
 -----------------------
 
