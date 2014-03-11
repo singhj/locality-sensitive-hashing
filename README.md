@@ -57,8 +57,11 @@ The problems we had with using the streaming API have been resolved and the code
 To read tweets,
  1. Download the repo
  2. Get your own consumer_key and consumer_secret from the Twitter App [Registration page](https://apps.twitter.com/).
+    - The consumer keys are your application api key and secret key.
  3. Set up callback URL appropriately.
  4. Change application id in app.yaml and push the code
+    - If you set up 2-step Verification on your google user account you will need to create an application specific password. This will be the application you use when you deploy your GAE app.
+    - Go to more info: https://support.google.com/accounts/answer/185833?hl=en for more info.
  5. Visit <your application id>.appspot.com/get_tweets in your favorite browser.
  6. You will need to give permission to invoke the Twitter API on your behalf
  7. The tweets will be visible in the logs. Go to https://appengine.google.com/ and navigate to logs for your application.
