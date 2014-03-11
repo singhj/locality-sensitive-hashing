@@ -27,7 +27,6 @@ pip-log.txt
 nosetests.xml
 twitter.xml
 twitter_settings.xml
-twitter_settings.py
 
 # Translations
 *.mo
