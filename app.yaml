@@ -1,4 +1,4 @@
-application: gae-fb-canvas
+application: lsh-test-app-tb
 version: 1
 runtime: python27
 api_version: 1
@@ -24,6 +24,9 @@ handlers:
 - url: /.*
   script: main.application
   login: required
+
+env_variables:
+ GAE_USE_SOCKETS_HTTPLIB : True
 
 libraries:
 - name: webapp2
