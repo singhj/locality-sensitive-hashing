@@ -36,7 +36,7 @@ class TwitterStatusListener(StreamListener):
         self.tweet_counter += 1
 
         if self.tweet_counter >= DEFAULT_NUM_TWEETS:
-            return False
+            return False # this should trigger closing the connection
         else:
             return True
 
