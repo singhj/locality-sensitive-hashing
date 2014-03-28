@@ -35,6 +35,7 @@ import logging
 import re
 import urllib
 import webapp2
+import session
 
 from google.appengine.ext import blobstore
 from google.appengine.ext import db
@@ -68,14 +69,9 @@ class Greeting(ndb.Model):
     content = ndb.StringProperty(indexed=False)
     date = ndb.DateTimeProperty(auto_now_add=True)
 
-class MainPage(webapp2.RequestHandler):
+class MainPage(session.BaseRequestHandler):
 
     def get(self):
-        guestbook_name = self.request.get('guestbook_name',
-                                          DEFAULT_GUESTBOOK_NAME)
-        greetings_query = Greeting.query(
-            ancestor=guestbook_key(guestbook_name)).order(-Greeting.date)
-        greetings = greetings_query.fetch(10)
 
         if users.get_current_user():
             url = users.create_logout_url(self.request.uri)
@@ -83,15 +79,25 @@ class MainPage(webapp2.RequestHandler):
         else:
             url = users.create_login_url(self.request.uri)
             url_linktext = 'Login'
+        
+        try:
+            tw_auth = self.session['tw_auth']
+        except:
+            tw_auth = False
+
+        try:
+            tw_status = self.session['tw_status']
+        except:
+            tw_status = False
 
         template_values = {
-            'greetings': greetings,
-            'guestbook_name': urllib.quote_plus(guestbook_name),
             'url': url,
             'url_linktext': url_linktext,
+            'tw_auth': tw_auth,
+            'tw_status': tw_status,
         }
 
-        template = JINJA_ENVIRONMENT.get_template('index.html')
+        template = JINJA_ENVIRONMENT.get_template('tweets_index.html')
         self.response.write(template.render(template_values))
     def post(self):
         pass

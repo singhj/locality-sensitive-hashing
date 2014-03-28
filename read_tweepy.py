@@ -1,16 +1,21 @@
 import session
 import tweepy
 from tweepy import StreamListener
-import sys
+import sys, time
 from tweepy.api import API
 import socket
 
+from google.appengine.ext import ndb
 import twitter_settings
 import logging
 
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
 DEFAULT_NUM_TWEETS = 100
+
+class TwitterStatus(ndb.Model):
+    asof = ndb.DateTimeProperty('t',auto_now_add=True)
+    text = ndb.TextProperty('s')
 
 class TwitterStatusListener(StreamListener):
 
@@ -30,8 +35,10 @@ class TwitterStatusListener(StreamListener):
 
     def on_status(self, status):
         """Called when a new status arrives"""
-        text = status.text.encode('utf-8') + '\n'
-        logging.info('status: %s', text)
+        text = status.text.encode('utf-8')
+        status = TwitterStatus(text = text)
+        status.put()
+        #logging.info('status: %s', text)
 
         self.tweet_counter += 1
 
@@ -49,7 +56,7 @@ class TwitterStatusListener(StreamListener):
         time.sleep(60)
         return
 
-class PublicTweets(session.BaseRequestHandler):
+class TwitterLogin(session.BaseRequestHandler):
     def get(self):
         auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
         # Redirect user to Twitter to authorize
@@ -57,6 +64,8 @@ class PublicTweets(session.BaseRequestHandler):
         self.session['request_token_key'] = auth.request_token.key
         self.session['request_token_secret'] = auth.request_token.secret
         self.redirect(url)
+    def post(self):
+        self.get()
 
 class TwitterCallback(session.BaseRequestHandler):
     def get_args(self):
@@ -81,11 +90,19 @@ class TwitterCallback(session.BaseRequestHandler):
             auth.get_access_token(verifier)
         except tweepy.TweepError:
             logging.error('Error! Failed to get access token.')
+        
+        self.session['tw_auth'] = auth
+        self.session['tw_status'] = 'Logged In and Ready'
+        self.redirect('/')
 
+
+class TwitterGetTweets(session.BaseRequestHandler):
+    def get(self):
+        auth = self.session['auth']
         api = tweepy.API(auth)
         listen = TwitterStatusListener(api)
 
-        #note, tired doing secure=False which is not support by twitter api this gives an
+        #note, tried doing secure=False which is not support by twitter api this gives an
         # error for the sample.json end_point
         stream = tweepy.Stream(auth, listen)
         logging.info("getting stream now!")
@@ -95,12 +112,14 @@ class TwitterCallback(session.BaseRequestHandler):
         except tweepy.TweepError:
             logging.error("error with streaming api")
             stream.disconnect()
+        self.session['tw_status'] = 'Done getting tweets at %s' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
+        self.redirect('/')
 
-        # home_timeline = api.home_timeline()
-        # for status in home_timeline:
-        #     logging.info('home_timeline %s: %s', status.user.screen_name, status.text)
+    def post(self):
+        self.get()
 
 urls = [
-     ('/get_tweets', PublicTweets),
-     ('/twitter_callback', TwitterCallback)
+     ('/twitter_login', TwitterLogin),
+     ('/twitter_callback', TwitterCallback),
+     ('/twitter_get_tweets', TwitterGetTweets),
 ]

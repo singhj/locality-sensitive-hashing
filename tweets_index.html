@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+{% autoescape true %}
+<html>
+  <head>
+    <link type="text/css" rel="stylesheet" href="/stylesheets/main.css" />
+  </head>
+  <body>
+	{% if tw_auth %}
+	<p>{{ tw_status }}</p>
+    <form action="/twitter_get_tweets" method="post">
+        <input type="submit" value="Get tweets">
+    </form>
+    {% else %}
+    <form action="/twitter_login" method="post">
+        <input type="submit" value="Log Into Twitter">
+    </form>
+    {% endif %}
+    <a href="{{ url|safe }}">{{ url_linktext }}</a>
+
+  </body>
+</html>
+{% endautoescape %}
