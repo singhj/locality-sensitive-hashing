@@ -64,6 +64,14 @@ class TwitterLogin(session.BaseRequestHandler):
     def post(self):
         self.get()
 
+class TwitterLogout(session.BaseRequestHandler):
+    def get(self):
+        self.session['tw_auth'] = None
+        self.redirect('/')
+        return
+    def post(self):
+        self.get()
+
 class TwitterCallback(session.BaseRequestHandler):
     def get_args(self):
         """
@@ -175,4 +183,5 @@ urls = [
      ('/twitter_callback', TwitterCallback),
 #      ('/twitter_get_tweets', TwitterGetTweets),
      ('/twitter_read_node', TwitterReadNode),
+     ('/twitter_logout', TwitterLogout),
 ]

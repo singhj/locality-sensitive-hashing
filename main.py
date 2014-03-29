@@ -75,10 +75,10 @@ class MainPage(session.BaseRequestHandler):
 
         if users.get_current_user():
             url = users.create_logout_url(self.request.uri)
-            url_linktext = 'Logout'
+            url_linktext = 'Google Logout'
         else:
             url = users.create_login_url(self.request.uri)
-            url_linktext = 'Login'
+            url_linktext = 'Google Login -- use your Gmail'
         
         tw_auth = False
         try:

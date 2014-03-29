@@ -18,6 +18,10 @@
         <p>{{ tw_status|safe }}</p>
         <p></p>
         <p>&mdash; {{ tweets|safe }}</p>
+        <p></p>
+        <form action="/twitter_logout" method="post">
+            <input type="submit" value="Log out of twitter">
+        </form>
     {% else %}
     <form action="/twitter_login" method="post">
         <input type="submit" value="Log Into Twitter">
