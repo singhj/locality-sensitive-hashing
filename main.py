@@ -80,25 +80,35 @@ class MainPage(session.BaseRequestHandler):
             url = users.create_login_url(self.request.uri)
             url_linktext = 'Login'
         
+        tw_auth = False
         try:
             tw_auth = self.session['tw_auth']
-        except:
-            tw_auth = False
+        except: pass
 
+        tw_status = False
         try:
             tw_status = self.session['tw_status']
-        except:
-            tw_status = False
+        except: pass
+
+        tweets = ''
+        try:
+            tweets = self.session['tweets']
+        except: pass
 
         template_values = {
             'url': url,
             'url_linktext': url_linktext,
             'tw_auth': tw_auth,
             'tw_status': tw_status,
+            'tweets': tweets
         }
 
         template = JINJA_ENVIRONMENT.get_template('tweets_index.html')
-        self.response.write(template.render(template_values))
+        try:
+            self.response.write(template.render(template_values))
+        except UnicodeDecodeError:
+            template_values['tweets'] = 'unreadable content'
+            self.response.write(template.render(template_values))
     def post(self):
         pass
 

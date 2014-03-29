@@ -6,10 +6,18 @@
   </head>
   <body>
 	{% if tw_auth %}
-	<p>{{ tw_status }}</p>
-    <form action="/twitter_get_tweets" method="post">
-        <input type="submit" value="Get tweets">
-    </form>
+		<!-- 
+	    <form action="/twitter_get_tweets" method="post">
+	        <input type="submit" value="Get tweets">
+	    </form>
+	     -->
+	    <br />
+	    <form action="/twitter_read_node" method="post">
+	        <input type="submit" value="Twitter Read Node">
+	    </form>
+        <p>{{ tw_status|safe }}</p>
+        <p></p>
+        <p>&mdash; {{ tweets|safe }}</p>
     {% else %}
     <form action="/twitter_login" method="post">
         <input type="submit" value="Log Into Twitter">

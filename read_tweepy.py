@@ -1,28 +1,26 @@
 import session
 import tweepy
 from tweepy import StreamListener
-import sys, time
+import time
 from tweepy.api import API
-import socket
 
 from google.appengine.ext import ndb
 import twitter_settings
 import logging
+from pipe_node import PipeNode, NotFound, NotLoggedIn
 
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
 DEFAULT_NUM_TWEETS = 100
-
-class TwitterStatus(ndb.Model):
-    asof = ndb.DateTimeProperty('t',auto_now_add=True)
-    text = ndb.TextProperty('s')
 
 class TwitterStatusListener(StreamListener):
 
     def __init__(self, api=None):
         StreamListener.__init__(self, api=api)
         self.api = api or API()
-        self.tweet_counter = 0
+        self.tweets = []
+        self.start_time = time.gmtime()
+        self.prefix = str(int(time.time()))
 
     def on_connect(self):
         """Called once connected to streaming server.
@@ -35,14 +33,13 @@ class TwitterStatusListener(StreamListener):
 
     def on_status(self, status):
         """Called when a new status arrives"""
-        text = status.text.encode('utf-8')
-        status = TwitterStatus(text = text)
-        status.put()
+        text = status.text #.encode('utf-8')
+        self.tweets.append(text) 
+#         status = TwitterStatus(text = text)
+#         status.put()
         #logging.info('status: %s', text)
 
-        self.tweet_counter += 1
-
-        if self.tweet_counter >= DEFAULT_NUM_TWEETS:
+        if len(self.tweets) >= DEFAULT_NUM_TWEETS:
             return False # this should trigger closing the connection
         else:
             return True
@@ -112,14 +109,70 @@ class TwitterGetTweets(session.BaseRequestHandler):
         except tweepy.TweepError:
             logging.error("error with streaming api")
             stream.disconnect()
-        self.session['tw_status'] = 'Done getting tweets at %s' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime())
-        self.redirect('/')
+        return (listen.tweets)
 
     def post(self):
         self.get()
 
+class TwitterStreamDump(ndb.Model):
+    asof = ndb.DateTimeProperty(auto_now_add=True)
+    content = ndb.TextProperty()
+
+class TwitterReadNode(TwitterGetTweets, PipeNode):
+    def Open(self):
+        if not ('auth' in self.session): 
+            raise NotLoggedIn("Not logged in into twitter")
+        auth = self.session['auth']
+        api = tweepy.API(auth)
+        if not api:
+            raise NotLoggedIn("Not logged in into twitter")
+        
+        # Read tweets from the stream
+        self.tweets = super(TwitterReadNode, self).get()
+        self.cursor = 0
+        self.count = len(self.tweets)
+        
+        logging.info('TwitterReadNode.Open completed')
+    
+    def GetNext(self):
+        if self.cursor < self.count:
+            tweet = self.tweets[self.cursor]
+            self.cursor += 1
+            return tweet
+        raise NotFound('Tweets exhausted')
+    
+    def Close(self, save = False):
+        tweets = '<br/>\n&mdash; '.join(self.tweets)
+        if save:
+            all_the_tweets = TwitterStreamDump(content = tweets)
+            all_the_tweets.put()
+
+        logging.info('TwitterReadNode.Close completed')
+        banner = 'Done getting tweets at %s' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()) 
+        self.session['tw_status'] = banner
+        self.session['tweets'] = tweets
+        self.redirect('/')
+    
+    def post(self):
+        try:
+            self.Open()
+        except:
+            self.session['tw_auth'] = None
+            self.redirect('/')
+            return
+        
+        while True:
+            try:
+                self.GetNext()
+            except NotFound as nf:
+                logging.info('TwitterReadNode.GetNext completed, %s', nf.value)
+                break
+        
+        self.Close(save = True)
+
 urls = [
      ('/twitter_login', TwitterLogin),
      ('/twitter_callback', TwitterCallback),
-     ('/twitter_get_tweets', TwitterGetTweets),
+#      ('/twitter_get_tweets', TwitterGetTweets),
+     ('/twitter_read_node', TwitterReadNode),
 ]
