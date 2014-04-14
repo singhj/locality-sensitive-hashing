@@ -103,7 +103,7 @@ class TwitterCallback(session.BaseRequestHandler):
 
 class TwitterGetTweets(session.BaseRequestHandler):
     def get(self):
-        auth = self.session['auth']
+        auth = self.session['tw_auth']
         api = tweepy.API(auth)
         listen = TwitterStatusListener(api)
 
@@ -128,12 +128,14 @@ class TwitterStreamDump(ndb.Model):
 
 class TwitterReadNode(TwitterGetTweets, PipeNode):
     def Open(self):
-        if not ('auth' in self.session): 
-            raise NotLoggedIn("Not logged in into twitter")
-        auth = self.session['auth']
+        if not ('tw_auth' in self.session):
+            logging.error("Not logged in into twitter, tw_auth key not found in session dict")
+            raise NotLoggedIn("Not logged in into twitter...auth not in session dict")
+        auth = self.session['tw_auth']
         api = tweepy.API(auth)
         if not api:
-            raise NotLoggedIn("Not logged in into twitter")
+            logging.error("Not logged in into twitter, no tweepy api")
+            raise NotLoggedIn("Not logged in into twitter...no tweepy api")
         
         # Read tweets from the stream
         self.tweets = super(TwitterReadNode, self).get()
