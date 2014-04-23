@@ -1,11 +1,11 @@
 
 
 class PipeNode(object):
-    def Open(self):
+    def open(self):
         pass
-    def GetNext(self):
-        raise NotImplementedError("Subclasses should implement GetNext()")
-    def Close(self):
+    def getNext(self):
+        raise NotImplementedError("Subclasses should implement getNext()")
+    def close(self):
         pass
 
 class NotFound(Exception):
