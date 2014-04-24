@@ -4,7 +4,7 @@ OpenLSH
 Stages
 ------
 
-OpenLSH is an open source platform dessigned. It encompasses an end-to-end architecture comprising the following _stages_:
+OpenLSH is an open source platform that implements Locality Sensitive Hashing. It encompasses an end-to-end architecture comprising the following _stages_:
  1. Data mining from social media: Twitter, LinkedIn, Github, &hellip;,
  2. Filtering incoming data,
  3. Shingling,
