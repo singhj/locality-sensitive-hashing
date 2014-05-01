@@ -65,4 +65,11 @@ To read tweets,
  5. Visit <your application id>.appspot.com/get_tweets in your favorite browser.
  6. You will need to give permission to invoke the Twitter API on your behalf
  7. The tweets will be visible in the logs. Go to https://appengine.google.com/ and navigate to logs for your application.
- 
+
+
+References
+----------
+
+ 1. [LSH Presentation at Boston Data Mining Meetup](http://www.slideshare.net/j_singh/mining-of-massive-datasets-using-locality-sensitive-hashing-lsh).
+ 2. [Terasa's blog post about this project](http://quarksandbits.com/en/2014/04/23/using-twitter-streaming-api-google-app-engine/).
+ 3. [Mining of Massive Datasets book](http://infolab.stanford.edu/~ullman/mmds/book.pdf).
