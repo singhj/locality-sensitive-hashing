@@ -66,6 +66,25 @@ To read tweets,
  6. You will need to give permission to invoke the Twitter API on your behalf
  7. The tweets will be visible in the logs. Go to https://appengine.google.com/ and navigate to logs for your application.
 
+Testing
+----------
+
+We are using nose and mock to aid with unit testing various OpenLSH modules. These libraries
+are included in the project as they are needed by Google App Engine. You will need to install these
+on your local development machine as well.
+
+To install testing libraries (assumes you have pip installed) from the command line type the following commands:
+* install nose: pip install nose
+* install mock: pip install mock
+
+To run all tests:
+1. From the command line navigate to the to the /tests in each package.
+2. Type the following command: nosetests [test_pythone_file_name].py
+
+To run individual test method:
+1. From the command line navigate to the to the /tests in each package.
+2. Type the following command: nosetests [test_pythone_file_name].py:test_method_name
+
 
 References
 ----------

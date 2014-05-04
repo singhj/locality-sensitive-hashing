@@ -51,7 +51,7 @@ class FIFOQueue(BaseQueue):
         else:
             raise Exception("Queue instance does not exist.")
 
-
+# for quick testing only...remote and add unit tests instead
 # if __name__ == '__main__':
 #
 #     test = FIFOQueue.instance()
