@@ -78,12 +78,12 @@ To install testing libraries (assumes you have pip installed) from the command l
 * install mock: pip install mock
 
 To run all tests:
-1. From the command line navigate to the to the /tests in each package.
-2. Type the following command: nosetests [test_pythone_file_name].py
+ 1. From the command line navigate to the to the /tests in each package.
+ 2. Type the following command: nosetests [test_pythone_file_name].py
 
 To run individual test method:
-1. From the command line navigate to the to the /tests in each package.
-2. Type the following command: nosetests [test_pythone_file_name].py:test_method_name
+ 1. From the command line navigate to the to the /tests in each package.
+ 2. Type the following command: nosetests [test_pythone_file_name].py:test_method_name
 
 
 References
