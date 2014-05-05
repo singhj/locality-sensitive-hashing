@@ -1,7 +1,7 @@
 
 
 def jaccard_similarity(set1, set2):
-    return _calculate_jaccard_similairty(set1, set2)
+    return __calculate_jaccard_similairty(set1, set2)
 
 def __calculate_jaccard_similairty(set1, set2):
     x = len(set1.intersection(set2))
