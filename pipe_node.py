@@ -3,7 +3,7 @@
 class PipeNode(object):
     def open(self):
         pass
-    def getNext(self):
+    def get_next(self):
         raise NotImplementedError("Subclasses should implement getNext()")
     def close(self):
         pass

@@ -157,7 +157,7 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
 
         logging.info('TwitterReadNode.Open completed')
 
-    def getNext(self):
+    def get_next(self):
         while not self.twitter_listener.queue.empty():
             yield self.twitter_listener.queue.dequeue()
 
@@ -189,7 +189,7 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
         
         while True:
             try:
-                for tweet in self.getNext():
+                for tweet in self.get_next():
                     self.tweets.append(tweet) # adding to tweets collection so that we print the output in the browser during testing
             except NotFound as nf:
                 logging.info('TwitterReadNode.GetNext completed, %s', nf.value)
