@@ -21,18 +21,17 @@ def shingle_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE, type=ShingleType
         :return: generator that returns a set of shingles, k-shingles are represented as a set of strings, w-shingles are
         represented as a set of tuples
     """
-
     if not ShingleType.is_valid(type):
         raise ValueError('%s is not a valid shingle type. Valid types are "w-shingles or k-shingles. Please use ShinglesType.' % type)
 
     if type == ShingleType.K_SHINGLES:
-        for s in __k_shingles_generator(doc_generator, size):
+        for s in _k_shingles_generator(doc_generator, size):
             yield s
     else:
-        for s in __w_shingles_generator(doc_generator, size):
+        for s in _w_shingles_generator(doc_generator, size):
             yield s
 
-def __w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
+def _w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
     """
         Generator that yields set of w-shingles
         :param doc_generator: generator that returns documents as strings
@@ -41,19 +40,22 @@ def __w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
     """
 
     for doc in doc_generator:
-        #step 1: tokenize string
-        tokens = tuple(strings_utils.tokenize(doc))
+        if doc:
+            #step 1: tokenize string
+            tokens = tuple(strings_utils.tokenize(doc))
 
-        #step 2: remove punctuation, make string lower case
-        tokens = tuple(map(strings_utils.normalize, tokens))
+            #step 2: remove punctuation, make string lower case
+            tokens = tuple(map(strings_utils.normalize, tokens))
 
-        #step 3: do stemming TODO - implement stemming funciton, for now just returns what was passed in
-        tokens = tuple(map(strings_utils.get_stem, tokens))
+            #step 3: do stemming TODO - implement stemming funciton, for now just returns what was passed in
+            tokens = tuple(map(strings_utils.get_stem, tokens))
 
-        #step 4: create shingle tupule and add to list
-        yield set(__get_list_of_shingles(tokens, size))
+            #step 4: create shingle tupule and add to list
+            yield set(_get_list_of_shingles(tokens, size))
+        else:
+            yield None
 
-def __k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
+def _k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
     """
         Generator that yields set of k-shingles
         :param doc_generator: generator that returns documents as strings
@@ -70,9 +72,11 @@ def __k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
             cleaned_doc = strings_utils.normalize(cleaned_doc)
 
             #step 3: get singles and add to set
-            yield set(__get_list_of_shingles(cleaned_doc, size))
+            yield set(_get_list_of_shingles(cleaned_doc, size))
+        else:
+            yield None
 
-def __get_list_of_shingles(doc, size=DEFAULT_SHINGLE_SIZE):
+def _get_list_of_shingles(doc, size=DEFAULT_SHINGLE_SIZE):
     """
         Creates a list of shingles (strings)
         :param doc: doc to create shingles from
