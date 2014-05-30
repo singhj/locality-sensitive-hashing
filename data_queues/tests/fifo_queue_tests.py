@@ -1,6 +1,7 @@
-from mock import patch
+from mock.mock import patch
 from nose import tools as nt
-from nose.tools import raises, with_setup
+from nose.tools.nontrivial import raises
+from nose.tools.nontrivial import with_setup
 from data_queues.fifo_queue import FIFOQueue
 
 # test helpers

@@ -1,4 +1,4 @@
-from base_queue import BaseQueue
+from data_queues.base_queue import BaseQueue
 import threading
 import Queue
 
