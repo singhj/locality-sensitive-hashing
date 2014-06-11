@@ -24,6 +24,8 @@ def run(shingles_set):
                 if count == 0:
                     shingle_hash = calc_hash(shingle)
                 else:
+                    #TODO perhaps we should abstract this out so that users can configure there
+                    #own hashing function(s)?
                     num = RANDOM_NUMBERS[count]
                     shingle_hash = do_xor(calc_hash(shingle), num)
 
