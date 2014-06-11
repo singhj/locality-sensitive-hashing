@@ -7,13 +7,13 @@ DEFAULT_BITS = 32 #TODO should create global config to set this
 
 RANDOM_NUMBERS = RNG.instance(DEFAULT_NUM_RANDOM_NUMS, DEFAULT_BITS)
 
-def run(shingles_generator):
+def run(shingles_set):
 
     #basic minhash implementation algorithm steps...
     min_hash_values = []
 
-    if shingles_generator:
-        for shingle in shingles_generator():
+    if shingles_set:
+        for shingle in shingles_set():
             # reset min-heap as each shingle should get it's own min-heap
             # to calculate the minimum hash value
             min_heap = []
