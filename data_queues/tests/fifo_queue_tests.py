@@ -17,7 +17,7 @@ def setup_func():
 def teardown_func():
 
     # empty queue and "None" out instance and queue so each test has fresh instance
-    # this is needed since FIFOQueue is a thread sage singleton
+    # this is needed since FIFOQueue is a thread safe singleton
 
     while not FIFOQueue.instance().empty():
         FIFOQueue.instance().dequeue()

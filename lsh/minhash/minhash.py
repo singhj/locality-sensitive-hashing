@@ -4,9 +4,8 @@ from lsh.utils.random_number_generator import RNG
 from lsh.utils.similarity import jaccard_similarity
 from lsh.shingles.shingles import shingle_generator, ShingleType
 
-
-DEFAULT_NUM_RANDOM_NUMS = 200 #TODO should create global config to set this
-DEFAULT_BITS = 32 #TODO should create global config to set this
+DEFAULT_NUM_RANDOM_NUMS = 200 #TODO should create a config to set this
+DEFAULT_BITS = 32 #TODO should create a config to set this
 
 # we want to use the same random numbers across all documents we check, that is why I'm using
 # a thread safe, singleton to generate my random numbers
@@ -53,64 +52,3 @@ def calc_hash(value):
 
 def do_xor(a, b):
     return xor(a,b)
-
-#TODO for dev testing only remove when done
-if __name__ == '__main__':
-
-    def test_generator_string():
-        yield "abcde fghijcklm nop."
-
-    def test_generator_string_2():
-        yield "abcdefghi jcklmnop qrs!"
-
-    print "testing k-shingles (shingling, minhash & calc jaccard similarity)"
-
-    min_values_set_k_shingles = None
-    for s in shingle_generator(test_generator_string()):
-        print s
-        min_values_set_k_shingles = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_k_shingles))
-        print min_values_set_k_shingles
-        print
-
-    min_values_set_k_shingles_2 = None
-    for s in shingle_generator(test_generator_string_2()):
-        print s
-        min_values_set_k_shingles_2 = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_k_shingles_2))
-        print min_values_set_k_shingles_2
-        print
-
-    print "Calculating Jaccard Similarity k-shingles test:"
-    similarity_ratio = jaccard_similarity(min_values_set_k_shingles, min_values_set_k_shingles_2)
-    print similarity_ratio # should be approx 82% similar
-
-    print "-----"
-
-    def test_generator_string_words():
-        yield "do or do not there is no try!"
-
-    def test_generator_string_words_2():
-        yield "do or do not there is no try...or just give up!"
-
-    print "testing w-shingles (shingling, minhash & calc jaccard similarity)"
-
-    min_values_set_w_shingles = None
-    for s in shingle_generator(test_generator_string_words(), type=ShingleType.W_SHINGLES):
-        print s
-        min_values_set_w_shingles = run(s)
-        print "number of min_hash values -> %s" % str(len(min_values_set_w_shingles))
-        print min_values_set_w_shingles
-        print
-
-    min_values_set_w_shingles_2 = None
-    for s in shingle_generator(test_generator_string_words_2(), type=ShingleType.W_SHINGLES):
-        print s
-        min_values_set_w_shingles_2 = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_w_shingles_2))
-        print min_values_set_w_shingles_2
-        print
-
-    print "Calculating Jaccard Similarity w-shingles test:"
-    similarity_ratio = jaccard_similarity(min_values_set_w_shingles, min_values_set_w_shingles_2)
-    print similarity_ratio # should be approx 44% similar
