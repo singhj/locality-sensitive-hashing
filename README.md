@@ -85,6 +85,9 @@ To run individual test method:
  1. From the command line navigate to the to /tests in each package.
  2. Type the following command: nosetests [test_python_file_name].py:test_method_name
 
+To turn off capturing stdout during tests: 
+nosetests --nocapture
+
 
 References
 ----------
