@@ -28,7 +28,6 @@ def run(shingles_set):
             min_heap = []
 
             for count in range(0, DEFAULT_NUM_RANDOM_NUMS):
-
                 #step 1: calculate hash values for current shingle
                 if count == 0:
                     shingle_hash = calc_hash(shingle)

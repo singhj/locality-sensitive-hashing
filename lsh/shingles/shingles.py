@@ -51,7 +51,7 @@ def _w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
             tokens = tuple(map(strings_utils.get_stem, tokens))
 
             #step 4: create shingle tupule and add to list
-            yield set(_get_list_of_shingles(tokens, size))
+            yield set(_get_list_of_shingles(tokens, size)), doc
         else:
             yield None
 
@@ -72,7 +72,7 @@ def _k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
             cleaned_doc = strings_utils.normalize(cleaned_doc)
 
             #step 3: get singles and add to set
-            yield set(_get_list_of_shingles(cleaned_doc, size))
+            yield set(_get_list_of_shingles(cleaned_doc, size)), doc
         else:
             yield None
 
