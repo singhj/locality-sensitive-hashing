@@ -1,34 +1,20 @@
-from lsh.lsh.base import LshBase
+from lsh.lsh.lsh_base import LshBase
 from lsh.utils.similarity import jaccard_similarity
 from lsh.models.document import Document
 
-def calculate_num_rows_per_band(self, num_total_rows, num_bands):
-
-    num_rows = 0
-
-    if num_bands > 0:
-        num_rows = num_total_rows / num_bands
-
-    return num_rows
-
-def calc_hash(value):
-    return hash(value)
 
 class LshJaccard(LshBase):
 
-    def __init__(self, bands=20, rows_per_band=10, num_minhash_signatures=200, threshold=0.0):
+    def __init__(self, num_bands=20, rows_per_band=10, threshold=0.0):
 
         # number of bands (i.e. buckets) to create
-        self.num_bands = bands
-
-        # total number of minhash signatures we expected from each document
-        self.num_total_rows = num_minhash_signatures
+        self.num_bands = num_bands
 
         # this will be the number of signatures in a vector to be hashed
         self.num_rows_per_band = rows_per_band
 
         #should be thread safe if one instance of this class is used by threads in a pool.
-        self.buckets = self._create_band_dicts()
+        self.bands = self._create_band_dicts()
 
         #note, the default settings give you a threshold ~.74
         if threshold == 0.0:
@@ -49,10 +35,10 @@ class LshJaccard(LshBase):
             #step 3: for each vector hash it and add to the proper band
             #TODO Check if this changes order when converting from list to set
             #TODO explore potentially more consistent hashing algorithms
-            hash = calc_hash(frozenset(vector))
+            hash = calculate_hash(frozenset(vector))
 
             #step 4: get current bucket (dict)
-            curr_bucket_dict = self.buckets[bucket_idx]
+            curr_bucket_dict = self.bands[bucket_idx]
 
             #step 5: get docs from the current bucket (if any exist)
             docs = curr_bucket_dict.get(hash, None)
@@ -77,6 +63,9 @@ class LshJaccard(LshBase):
                         print document_2.get_signatures()
 
             bucket_idx += 1
+
+    def calculate_hash(self, value):
+        return hash(value)
 
     def _get_vector(self, signatures, n):
 
@@ -128,6 +117,7 @@ class LshJaccard(LshBase):
                 buckets.append({})
 
         return buckets
+
 
 # for quick testing only...remote and add unit tests instead
 # if __name__ == '__main__':
