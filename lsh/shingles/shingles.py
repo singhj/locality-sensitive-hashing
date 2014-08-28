@@ -18,8 +18,8 @@ def shingle_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE, type=ShingleType
         :param doc_generator: generator that returns documents as strings
         :param size: size of w-shingles or k-shingles
         :param type: determines the type of shingles to create. (valid values => w-shingles or k-shingles)
-        :return: generator that returns a set of shingles, k-shingles are represented as a set of strings, w-shingles are
-        represented as a set of tuples
+        :return: generator that returns a list of shingles, k-shingles are represented as a list of strings, w-shingles are
+        represented as a list of tuples
     """
     if not ShingleType.is_valid(type):
         raise ValueError('%s is not a valid shingle type. Valid types are "w-shingles or k-shingles. Please use ShinglesType.' % type)
@@ -36,7 +36,7 @@ def _w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
         Generator that yields set of w-shingles
         :param doc_generator: generator that returns documents as strings
         :param size: size of w-shingles
-        :return: yields set of shingles (set of tuples), yields None if it can't generate set of shingles
+        :return: yields list of shingles (list of tuples), yields None if it can't generate list of shingles
     """
 
     for doc in doc_generator:
@@ -51,7 +51,7 @@ def _w_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
             tokens = tuple(map(strings_utils.get_stem, tokens))
 
             #step 4: create shingle tupule and add to list
-            yield set(_get_list_of_shingles(tokens, size)), doc
+            yield _get_list_of_shingles(tokens, size), doc #TODO remove returning doc...make the generator return Document objects that contain original document
         else:
             yield None
 
@@ -60,7 +60,7 @@ def _k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
         Generator that yields set of k-shingles
         :param doc_generator: generator that returns documents as strings
         :param size: size of k-shingles
-        :return: yields set of shingles (set of strings), yields None if it can't generate set of shingles
+        :return: yields list of shingles (list of strings), yields None if it can't generate list of shingles
     """
 
     for doc in doc_generator:
@@ -71,8 +71,8 @@ def _k_shingles_generator(doc_generator, size=DEFAULT_SHINGLE_SIZE):
             #step 2: remove punctuation and make all lower case
             cleaned_doc = strings_utils.normalize(cleaned_doc)
 
-            #step 3: get singles and add to set
-            yield set(_get_list_of_shingles(cleaned_doc, size)), doc
+            #step 3: get shingles list
+            yield _get_list_of_shingles(cleaned_doc, size), doc #TODO remove returning doc...make the generator return Document objects that contain original document
         else:
             yield None
 
@@ -90,20 +90,3 @@ def _get_list_of_shingles(doc, size=DEFAULT_SHINGLE_SIZE):
         return [doc[i:i + size] for i in range(len(doc) - size + 1)]
     else:
         return []
-
-#TODO for dev testing only remove when done
-# if __name__ == '__main__':
-#
-#     def test_generator_string():
-#         yield "abcdefghijcklmnop."
-#
-#     def test_generator_string_words():
-#         yield "do or do not there is no try!"
-#
-#     print "testing k-shingles"
-#     for s in shingle_generator(test_generator_string()):
-#         print s
-#
-#     print "testing w-shingles"
-#     for s in shingle_generator(test_generator_string_words(), type=ShingleType.W_SHINGLES):
-#         print s

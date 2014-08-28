@@ -1,4 +1,7 @@
+import sys
 
+def compute_positive_hash(value):
+    return hash(value) % ((sys.maxsize + 1) * 2)
 
 def jaccard_similarity(set1, set2):
     return __calculate_jaccard_similairty(set1, set2)
