@@ -21,24 +21,24 @@ def test_similarity_of_two_sets_using_k_shingles():
 
     print ".....Testing k-shingles (shingling, minhash & calc jaccard similarity)\n"
 
-    min_values_set_k_shingles = None
-    for s in shingle_generator(faux_generator_string()):
-        print s
-        min_values_set_k_shingles = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_k_shingles))
-        print min_values_set_k_shingles
+    min_values_list_k_shingles = None
+    for shingle, original_document in shingle_generator(faux_generator_string()):
+        print shingle
+        min_values_list_k_shingles = run(shingle)
+        print "number of min_hash values -> %s" % str(len(min_values_list_k_shingles))
+        print min_values_list_k_shingles
         print
 
-    min_values_set_k_shingles_2 = None
-    for s in shingle_generator(faux_generator_string_2()):
-        print s
-        min_values_set_k_shingles_2 = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_k_shingles_2))
-        print min_values_set_k_shingles_2
+    min_values_list_k_shingles_2 = None
+    for shingle, original_document in shingle_generator(faux_generator_string_2()):
+        print shingle
+        min_values_list_k_shingles_2 = run(shingle)
+        print "number of min_hash values -> %s" % str(len(min_values_list_k_shingles_2))
+        print min_values_list_k_shingles_2
         print
 
     # calculate jaccard similarity - should be approx 82% similar
-    similarity_ratio = jaccard_similarity(min_values_set_k_shingles, min_values_set_k_shingles_2)
+    similarity_ratio = jaccard_similarity(set(min_values_list_k_shingles), set(min_values_list_k_shingles_2))
     print "Asserting jaccard similarity should be ~82%\n"
 
     assert similarity_ratio >= .82
@@ -54,24 +54,24 @@ def test_similarity_of_two_sets_using_w_shingles():
 
     print ".....Testing w-shingles (shingling, minhash & calc jaccard similarity)\n"
 
-    min_values_set_w_shingles = None
-    for s in shingle_generator(faux_generator_string_words(), type=ShingleType.W_SHINGLES):
-        print s
-        min_values_set_w_shingles = run(s)
-        print "number of min_hash values -> %s" % str(len(min_values_set_w_shingles))
-        print min_values_set_w_shingles
+    min_values_list_w_shingles = None
+    for shingle, original_document in shingle_generator(faux_generator_string_words(), type=ShingleType.W_SHINGLES):
+        print shingle
+        min_values_list_w_shingles = run(shingle)
+        print "number of min_hash values -> %s" % str(len(min_values_list_w_shingles))
+        print min_values_list_w_shingles
         print
 
-    min_values_set_w_shingles_2 = None
-    for s in shingle_generator(faux_generator_string_words_2(), type=ShingleType.W_SHINGLES):
-        print s
-        min_values_set_w_shingles_2 = run(s)
-        print "number of min_hash values -> %s" % str( len(min_values_set_w_shingles_2))
-        print min_values_set_w_shingles_2
+    min_values_list_w_shingles_2 = None
+    for shingle, original_document in shingle_generator(faux_generator_string_words_2(), type=ShingleType.W_SHINGLES):
+        print shingle
+        min_values_list_w_shingles_2 = run(shingle)
+        print "number of min_hash values -> %s" % str(len(min_values_list_w_shingles_2))
+        print min_values_list_w_shingles_2
         print
 
     # calculate jaccard similarity - should be approx 44% similar
-    similarity_ratio = jaccard_similarity(min_values_set_w_shingles, min_values_set_w_shingles_2)
+    similarity_ratio = jaccard_similarity(set(min_values_list_w_shingles), set(min_values_list_w_shingles_2))
     print "Asserting jaccard similarity should be ~44%\n"
 
     assert similarity_ratio >= .44

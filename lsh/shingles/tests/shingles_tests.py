@@ -1,44 +1,44 @@
-from mock import patch
+from mock.mock import patch
 from nose import tools as nt
 from nose.tools import raises
 from lsh.shingles.shingles import ShingleType
 import lsh.shingles.shingles as shgl
 
 @patch('lsh.shingles.shingles._k_shingles_generator')
-def test_shingle_generator_k_shingles_yield_set_of_strings(mock_k_shingles_gen):
+def test_shingle_generator_k_shingles_yield_list_of_strings(mock_k_shingles_gen):
     # set up
     type = ShingleType.K_SHINGLES
     size = 4
 
-    faux_set = get_faux_set_of_k_shingles()
+    faux_results = get_faux_list_of_k_shingles()
     faux_string_generator = generator_string()
 
-    mock_k_shingles_gen.return_value = yield faux_set
+    mock_k_shingles_gen.return_value = yield faux_results
 
     # execute
     actual_results = next(shgl.shingle_generator(faux_string_generator, size=size, type=type))
 
     # asserts
     mock_k_shingles_gen.assert_called_once_with(faux_string_generator, size)
-    nt.eq_(actual_results, faux_set)
+    nt.eq_(actual_results, faux_results)
 
 @patch('lsh.shingles.shingles._w_shingles_generator')
-def test_shingle_generator_w_shingles_yield_set_of_tuples(mock_w_shingles_gen):
+def test_shingle_generator_w_shingles_yield_list_of_tuples(mock_w_shingles_gen):
      # set up
     type = ShingleType.W_SHINGLES
     size = 4
 
-    faux_set = get_faux_set_of_w_shingles()
+    faux_results = get_faux_list_of_w_shingles()
     faux_word_generator = generator_words()
 
-    mock_w_shingles_gen.return_value = yield faux_set
+    mock_w_shingles_gen.return_value = yield faux_results
 
     # execute
     actual_results = next(shgl.shingle_generator(faux_word_generator, size=size, type=type))
 
     # asserts
     mock_w_shingles_gen.assert_called_once_with(faux_word_generator, size)
-    nt.eq_(actual_results, faux_set)
+    nt.eq_(actual_results, faux_results)
 
 @raises(ValueError)
 def test_shingle_generator_invalid_shingle_type_raise_value_error():
@@ -51,14 +51,16 @@ def test_w_shingles_generator():
     # set up
     size = 4
     faux_generator = generator_words()
-    expected_results = get_faux_set_of_w_shingles()
+    expected_results = get_faux_list_of_w_shingles(), "do or do not there is no try!"
 
     # execute
     actual_results = next(shgl._w_shingles_generator(faux_generator, size))
 
     # assert
-    nt.eq_(actual_results, expected_results)
 
+    #sort as the list of shingles produced maybe in different order than mocked list
+    nt.eq_(sorted(actual_results[0]), sorted(expected_results[0]))
+    nt.eq_(actual_results[1], expected_results[1])
 
 def test_w_shingles_generator_empty_doc_in_generator_yield_None():
     # set up
@@ -76,13 +78,16 @@ def test_k_shingles_generator():
     # set up
     size = 4
     faux_generator = generator_string()
-    expected_results = get_faux_set_of_k_shingles()
+    expected_results = get_faux_list_of_k_shingles(), "abcd efghij cklmn op."
 
     # execute
     actual_results = next(shgl._k_shingles_generator(faux_generator, size))
 
     # assert
-    nt.eq_(actual_results, expected_results)
+
+    #sort as the list of shingles produced maybe in different order than mocked list
+    nt.eq_(actual_results[0].sort(), expected_results[0].sort())
+    nt.eq_(actual_results[1], expected_results[1])
 
 def test_k_shingles_generator_empty_doc_in_generator_yield_None():
     # set up
@@ -131,8 +136,8 @@ def generator_words():
 def get_faux_list_of_four_chars_long_strings():
     return ['abcd', 'bcd ', 'cd e', 'd ef', ' efg', 'efgh', 'fghi', 'ghij', 'hij ', 'ij c', 'j ck', ' ckl', 'cklm', 'klmn', 'lmn ', 'mn o', 'n op', ' op.']
 
-def get_faux_set_of_k_shingles():
-    return set(['abcd', 'bcde', 'cdef', 'fghi', 'hijc', 'mnop', 'lmno', 'defg', 'cklm', 'efgh', 'ghij', 'jckl', 'klmn', 'ijck'])
+def get_faux_list_of_k_shingles():
+    return ['abcd', 'bcde', 'cdef', 'fghi', 'hijc', 'mnop', 'lmno', 'defg', 'cklm', 'efgh', 'ghij', 'jckl', 'klmn', 'ijck']
 
-def get_faux_set_of_w_shingles():
-    return set([('do', 'or', 'do', 'not'), ('do', 'not', 'there', 'is'), ('there', 'is', 'no', 'try'), ('or', 'do', 'not', 'there'), ('not', 'there', 'is', 'no')])
+def get_faux_list_of_w_shingles():
+    return [('do', 'or', 'do', 'not'), ('do', 'not', 'there', 'is'), ('there', 'is', 'no', 'try'), ('or', 'do', 'not', 'there'), ('not', 'there', 'is', 'no')]

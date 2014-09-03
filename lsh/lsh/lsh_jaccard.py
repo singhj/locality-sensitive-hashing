@@ -1,7 +1,7 @@
 from lsh.lsh.lsh_base import LshBase
 from lsh.utils.similarity import jaccard_similarity
 from lsh.utils.similarity import compute_positive_hash
-from lsh.models.documents.jaccard_document import JaccardDocument as JDocuemnt
+from lsh.models.documents.jaccard_document import JaccardDocument
 
 def _get_document_from_band(hash_code, band_dict):
     if hash_code and band_dict:
@@ -33,59 +33,58 @@ class LshJaccard(LshBase):
 
         #step 1: get document hash signature list
         signatures = list(document.get_signatures_list())
-        band_idx = 0
 
-        #step 2: get vectors
-        for vector in self._get_vector(signatures, self.num_rows_per_band):
+        #get current band
+        for band_idx in xrange(0, self.num_bands):
 
-            #step 3: for each vector hash it and add to the proper band
+            #step 2: get minhash signature vectors for current band (xrange "start" in function is 0)
+            for vector in self._get_vector(signatures, self.num_rows_per_band):
 
-            # note, wrapping in tuple as it will maintain order and is immutable
-            # immutability enables us to calculate a hash for it
-            vector_tuple = tuple(vector)
+                #step 3: for each vector hash it and add to the proper band
 
-            hash = self._calculate_hash(vector_tuple)
+                # note, wrapping in tuple as it will maintain order and is immutable
+                # immutability enables us to calculate a hash for it
+                vector_tuple = tuple(vector)
 
-            #step 4: get current band
-            current_band_dict = self._get_band_by_index(band_idx)
+                vector_hash = self._calculate_hash(vector_tuple)
 
-            #step 5: get docs from the current band, for current hash
-            docs = _get_document_from_band(hash, current_band_dict)
+                #step 4: get current band
+                current_band_dict = self._get_band_by_index(band_idx)
 
-            #if we don't have docs, add the current doc to a new list and update band
-            if not docs:
-                current_band_dict[hash] = [document]
-            else:
-                #step 6: check similarity of document pair
+                #step 5: get docs from the current band, for current hash
+                docs = _get_document_from_band(vector_hash, current_band_dict)
 
-                #for now we only store one document per band, so we get the first document in the list
-                #as it's the only one that should be stored
-                candidate_document = current_band_dict[hash][0]
-                score = self._calculate_similarity_score(document, candidate_document)
-
-                if self._documents_are_similar(score):
-                    print "\nmatch found (score): %s" % str(score)
-                    print document.get_original_document()
-                    print document.get_signatures_list()
-                    print "-------"
-                    print candidate_document.get_original_document()
-                    print candidate_document.get_signatures_list()
-                    break #TODO yield pair of docs as a tuple along with score
+                #if we don't have docs, add the current doc to a new list and update band
+                if not docs:
+                    current_band_dict[vector_hash] = [document]
                 else:
-                    print "\n------------ ***** ------------------ ****\n"
-                    print "score not higher than threshold: %s" % str(score)
-                    print document.get_original_document()
-                    print document.get_signatures_list()
-                    print "-------"
-                    print candidate_document.get_original_document()
-                    print candidate_document.get_signatures_list()
-                    break #TODO yield pair of docs as a tuple along with score
+                    #step 6: check similarity of document pair
 
-            band_idx += 1
+                    #for now we only store one document per band, so we get the first document in the list
+                    #as it's the only one that should be stored
+                    candidate_document = current_band_dict[vector_hash][0]
+                    score = self._calculate_similarity_score(document, candidate_document)
+
+                    if self._documents_are_similar(score):
+                        results_dict = {
+                                "score": score,
+                                "match_found": True,
+                                "document_1": document.get_original_document(),
+                                "document_2": candidate_document.get_original_document()
+                            }
+                        return results_dict
+                    else:
+                        results_dict = {
+                                "score": score,
+                                "match_found": False,
+                                "document_1": document.get_original_document(),
+                                "document_2": candidate_document.get_original_document()
+                            }
+                        return results_dict
 
     #--- helper functions ----
 
-    #TODO refactor to allow use of user defined hash function
+    #TODO refactor so that users can specify their own hashing function(s)
     def _calculate_hash(self, obj):
         """
             This method computes hash of object using a dynamic hashing function.
@@ -101,23 +100,43 @@ class LshJaccard(LshBase):
 
 
     def _documents_are_similar(self, similarity_score):
+        """
+            Checks if similarity score against threshold.
+            :param similarity_score:
+            :return: True if similarity score is greater than or equal to threshold, otherwise False
+        """
         return similarity_score >= self.threshold
 
     def _get_band_by_index(self, idx):
-        if self.bands:
+        """
+         Gets band by idx from bands collection.
+            :param idx:
+            :return: None if bands None or idx is greater than number of length of bands collection.
+        """
+        if self.bands and idx < len(self.bands):
             return self.bands[idx]
 
         return None
 
     def _get_vector(self, signatures, n):
-
+        """
+            Slices signatures into lists of n rows.
+            :param signatures: list of minhash signatures
+            :param n: number of rows to include in slice
+            :return: list (vector)
+        """
         for i in xrange(0, len(signatures), n):
             #yes, technically this is a list slice not a vector
             yield signatures[i:i+n]
 
     def _calculate_similarity_score(self, document_1, document_2):
-
-        score = 0
+        """
+            Calculate similarity score for givens documents.
+            :param document_1:
+            :param document_2:
+            :return: 0.0 if score can't be calculated otherwise returns calculated value
+        """
+        score = 0.0
 
         if document_1 and document_2:
             shingles_set_1 = document_1.get_shingles_as_set()
@@ -128,6 +147,10 @@ class LshJaccard(LshBase):
         return score
 
     def _calculate_threshold(self):
+        """
+            Calculate threshold.
+            :return: threshold returned, if threshold can't be calculated returns 0.0
+        """
 
         #(1/b)^(1/r)
         # b = # of bands
@@ -139,7 +162,7 @@ class LshJaccard(LshBase):
         if _b > 0 and _r > 0:
             return (1.0/_b)**(1.0/_r)
 
-        return 0
+        return 0.0
 
     def _create_band_dicts(self):
         """
@@ -178,16 +201,28 @@ if __name__ == '__main__':
         for doc in test_docs:
             yield doc
 
+    # Examples: Lower the number of bands the higher the threshold becomes
+    # num_bands divides evenly into the number
+    #num_bands=100, rows_per_band=2 => 0.1
+    #num_bands=50, rows_per_band=4 => 0.37
+    #num_bands=10, rows_per_band=20 => 0.89
+    #num_bands=20, rows_per_band=10 => 0.74
+    #num_bands=5, rows_per_band=40 => 0.96
+
     lshj = LshJaccard(num_bands=20, rows_per_band=10)
     print "-- number of bands: %s" % str(lshj.num_bands)
     print "-- number of rows per band: %s" % str(lshj.num_rows_per_band)
     print "-- default threshold: %s" % str(lshj._calculate_threshold())
     print ""
 
-    for shingles_list, doc in shingle_generator(faux_doc_generator()):
+    for shingles_list, original_document in shingle_generator(faux_doc_generator()):
+        # get minhash signatures for each shingle list
         min_hash_signatures = minhash.run(shingles_list)
 
-        #print min_hash_signatures
+        #create document and run LSH for Jaccard Distance
+        doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
 
-        doc = JDocuemnt(doc, shingles_list, min_hash_signatures)
-        lshj.run(doc)
+        results = lshj.run(doc_obj)
+
+        if results:
+            print results

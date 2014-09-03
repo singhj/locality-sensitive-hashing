@@ -32,8 +32,7 @@ def run(shingles_list):
                 if count == 0:
                     shingle_hash = calc_hash(shingle)
                 else:
-                    #TODO perhaps we should abstract this out so that users can configure there
-                    #own hashing function(s)?
+                    #TODO refactor so that users can specify their own hashing function(s)
                     num = RANDOM_NUMBERS[count]
                     shingle_hash = do_xor(calc_hash(shingle), num)
 
@@ -46,6 +45,7 @@ def run(shingles_list):
 
     return min_hash_values
 
+#TODO refactor so that users can specify their own hashing function(s)
 def calc_hash(value):
      return compute_positive_hash(value)
 
