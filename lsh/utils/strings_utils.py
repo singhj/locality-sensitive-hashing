@@ -32,7 +32,13 @@ def normalize(str):
     """
 
     if str:
-        return str.lower().translate(string.maketrans("",""), string.punctuation)
+        if isinstance(str, unicode):
+            not_letters_or_digits = u'!"#%\'()*+,-./:;<=>?@[\]^_`{|}~'
+            translate_to = u''
+            translate_table = dict((ord(char), translate_to) for char in not_letters_or_digits)
+            return str.translate(translate_table)
+        else:
+            return str.lower().translate(string.maketrans("",""), string.punctuation)
     else:
         return str
 

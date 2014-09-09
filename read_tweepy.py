@@ -9,9 +9,18 @@ import logging
 from pipe_node import PipeNode, NotFound, NotLoggedIn
 from data_queues.fifo_queue import FIFOQueue
 
+from lsh.lsh.lsh_base import LshBase
+from lsh.lsh.lsh_jaccard import LshJaccard
+from lsh.utils.similarity import jaccard_similarity
+from lsh.utils.similarity import compute_positive_hash
+from lsh.models.documents.jaccard_document import JaccardDocument
+from lsh.utils.similarity import jaccard_similarity
+from lsh.shingles.shingles import shingle_generator, ShingleType
+from lsh.minhash import minhash
+
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
-DEFAULT_NUM_TWEETS = 100
+DEFAULT_NUM_TWEETS = 800
 
 class TwitterStatusListener(StreamListener):
 
@@ -120,7 +129,7 @@ class TwitterGetTweets(session.BaseRequestHandler):
         auth = self.session['tw_auth']
         api = tweepy.API(auth)
         data_queue = FIFOQueue.instance()
-        listener = TwitterStatusListener(queue=data_queue, api=api, num_tweets=200, language="en")
+        listener = TwitterStatusListener(queue=data_queue, api=api, language="en")
 
         #note, tried doing secure=False which is not support by twitter api this gives an
         # error for the sample.json end_point
@@ -177,22 +186,42 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
         self.session['tw_status'] = banner
         self.session['tweets'] = tweets
         self.redirect('/')
-    
+
     def post(self):
         try:
             self.open()
             self.tweets = []
+            self.lshj = LshJaccard(num_bands=20, rows_per_band=10)
         except:
             self.session['tw_auth'] = None
             self.redirect('/')
             return
-        
+
         while True:
             try:
-                for tweet in self.get_next():
-                    self.tweets.append(tweet) # adding to tweets collection so that we print the output in the browser during testing
+                for shingles_list, original_document in shingle_generator(self.get_next()):
+                    # get minhash signatures for each shingle list
+                    min_hash_signatures = minhash.run(shingles_list)
+
+                    #create document and run LSH for Jaccard Distance
+                    doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
+
+                    logging.info('Running Jaccard LSH Current Tweet: %s', original_document)
+
+                    results = self.lshj.run(doc_obj)
+                    if results:
+                        logging.info('.....RESULTS.....')
+                        logging.info('.....score: %s', str(results['score']))
+                        logging.info('.....match_found: %s', str(results['match_found']))
+                        logging.info(results['document_1'])
+                        logging.info(results['document_2'])
+                        logging.info('---------------------------------------------------')
+                        logging.info('Results: %s', str(results['score']))
+
+                        #TODO update the code the read this and prints out score, docs and match boolean flag
+                        #self.tweets.append(str(results['score']))
             except NotFound as nf:
-                logging.info('TwitterReadNode.GetNext completed, %s', nf.value)
+                logging.error('TwitterReadNode.GetNext completed, %s', nf.value)
                 break
 
         self.close(save=True)

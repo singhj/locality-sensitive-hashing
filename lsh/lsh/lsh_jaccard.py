@@ -80,7 +80,8 @@ class LshJaccard(LshBase):
                                 "document_1": document.get_original_document(),
                                 "document_2": candidate_document.get_original_document()
                             }
-                        return results_dict
+                        if score > 0.0:
+                            return results_dict
 
     #--- helper functions ----
 
@@ -182,47 +183,47 @@ class LshJaccard(LshBase):
         return buckets
 
 
-# for quick testing only...remote and add unit tests instead
-if __name__ == '__main__':
-
-    from lsh.utils.similarity import jaccard_similarity
-    from lsh.shingles.shingles import shingle_generator, ShingleType
-    from lsh.minhash import minhash
-
-    test_docs = list()
-    test_docs.append("Mary had a little lamb, His fleece was white as snow, And everywhere that Mary went, The lamb was sure to go.")
-    test_docs.append("Mary had a little lamb, His fleece was wte as snow, And everywhere thot Mary went, The lamb was sure to go.")
-    test_docs.append("Maryhad a little lomb, is fleece was whit as snow, And evewhere thot Mary went, The lomb was sure to go.")
-    test_docs.append("Mary had a little lamb, His fleece wa")
-    test_docs.append("Mary")
-    test_docs.append("Mary had a little lamb, His fleece was white as snow, And everywhere that Mary went, The lamb was sure to go.")
-
-    def faux_doc_generator():
-        for doc in test_docs:
-            yield doc
-
-    # Examples: Lower the number of bands the higher the threshold becomes
-    # num_bands divides evenly into the number
-    #num_bands=100, rows_per_band=2 => 0.1
-    #num_bands=50, rows_per_band=4 => 0.37
-    #num_bands=10, rows_per_band=20 => 0.89
-    #num_bands=20, rows_per_band=10 => 0.74
-    #num_bands=5, rows_per_band=40 => 0.96
-
-    lshj = LshJaccard(num_bands=20, rows_per_band=10)
-    print "-- number of bands: %s" % str(lshj.num_bands)
-    print "-- number of rows per band: %s" % str(lshj.num_rows_per_band)
-    print "-- default threshold: %s" % str(lshj._calculate_threshold())
-    print ""
-
-    for shingles_list, original_document in shingle_generator(faux_doc_generator()):
-        # get minhash signatures for each shingle list
-        min_hash_signatures = minhash.run(shingles_list)
-
-        #create document and run LSH for Jaccard Distance
-        doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
-
-        results = lshj.run(doc_obj)
-
-        if results:
-            print results
+# # for quick testing only...remote and add unit tests instead
+# if __name__ == '__main__':
+#
+#     from lsh.utils.similarity import jaccard_similarity
+#     from lsh.shingles.shingles import shingle_generator, ShingleType
+#     from lsh.minhash import minhash
+#
+#     test_docs = list()
+#     test_docs.append("Mary had a little lamb, His fleece was white as snow, And everywhere that Mary went, The lamb was sure to go.")
+#     test_docs.append("Mary had a little lamb, His fleece was wte as snow, And everywhere thot Mary went, The lamb was sure to go.")
+#     test_docs.append("Maryhad a little lomb, is fleece was whit as snow, And evewhere thot Mary went, The lomb was sure to go.")
+#     test_docs.append("Mary had a little lamb, His fleece wa")
+#     test_docs.append("Mary")
+#     test_docs.append("Mary had a little lamb, His fleece was white as snow, And everywhere that Mary went, The lamb was sure to go.")
+#
+#     def faux_doc_generator():
+#         for doc in test_docs:
+#             yield doc
+#
+#     # Examples: Lower the number of bands the higher the threshold becomes
+#     # num_bands divides evenly into the number
+#     #num_bands=100, rows_per_band=2 => 0.1
+#     #num_bands=50, rows_per_band=4 => 0.37
+#     #num_bands=10, rows_per_band=20 => 0.89
+#     #num_bands=20, rows_per_band=10 => 0.74
+#     #num_bands=5, rows_per_band=40 => 0.96
+#
+#     lshj = LshJaccard(num_bands=20, rows_per_band=10)
+#     print "-- number of bands: %s" % str(lshj.num_bands)
+#     print "-- number of rows per band: %s" % str(lshj.num_rows_per_band)
+#     print "-- default threshold: %s" % str(lshj._calculate_threshold())
+#     print ""
+#
+#     for shingles_list, original_document in shingle_generator(faux_doc_generator()):
+#         # get minhash signatures for each shingle list
+#         min_hash_signatures = minhash.run(shingles_list)
+#
+#         #create document and run LSH for Jaccard Distance
+#         doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
+#
+#         results = lshj.run(doc_obj)
+#
+#         if results:
+#             print results
