@@ -58,6 +58,8 @@ urls = [
 ]
 import read_tweepy
 urls += read_tweepy.urls
+import blobs
+urls += blobs.urls
 
 sess_config = {}
 sess_config['webapp2_extras.sessions'] = {
