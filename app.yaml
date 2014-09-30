@@ -24,7 +24,7 @@ handlers:
 
 - url: /.*
   script: main.application
-  login: required
+  login: admin
 
 env_variables:
  GAE_USE_SOCKETS_HTTPLIB : True
