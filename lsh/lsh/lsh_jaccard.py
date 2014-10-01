@@ -2,12 +2,22 @@ from lsh.lsh.lsh_base import LshBase
 from lsh.utils.similarity import jaccard_similarity
 from lsh.utils.similarity import compute_positive_hash
 from lsh.models.documents.jaccard_document import JaccardDocument
+import copy
 
-def _get_document_from_band(hash_code, band_dict):
+def _get_documents(hash_code, band_dict):
     if hash_code and band_dict:
         return band_dict.get(hash_code, None)
-
     return None
+
+def _update_bucket(hash_code, band_dict, new_document):
+    docs = band_dict.get(hash_code, None)
+    if docs:
+        updated_docs = copy.deepcopy(docs)
+        updated_docs.append(new_document)
+        band_dict[hash_code] = updated_docs
+        # print "updated!!"
+        # for doc in updated_docs:
+        #     print doc.get_original_document()
 
 class LshJaccard(LshBase):
 
@@ -29,61 +39,80 @@ class LshJaccard(LshBase):
         else:
             self.threshold = threshold
 
-    def run(self, document):
+    def run(self, document_to_examine):
 
         #step 1: get document hash signature list
-        signatures = list(document.get_signatures_list())
+        signatures = list(document_to_examine.get_signatures_list())
+        start = 0
 
         #get current band
         for band_idx in xrange(0, self.num_bands):
 
-            #step 2: get minhash signature vectors for current band (xrange "start" in function is 0)
-            for vector in self._get_vector(signatures, self.num_rows_per_band):
+            #step 2: get minhash signature vector for current band
+            vector = self._get_vector(signatures, self.num_rows_per_band, start)
 
-                #step 3: for each vector hash it and add to the proper band
-
+            #step 3: hash current vector and add to it a new bucket or compare and record the document (and vector)
+            # that hashed to an existing bucket
+            if vector:
                 # note, wrapping in tuple as it will maintain order and is immutable
                 # immutability enables us to calculate a hash for it
                 vector_tuple = tuple(vector)
 
-                vector_hash = self._calculate_hash(vector_tuple)
+                if vector_tuple:
+                    vector_hash = self._calculate_hash(vector_tuple)
 
-                #step 4: get current band
-                current_band_dict = self._get_band_by_index(band_idx)
+                    #step 4: get current band
+                    current_band_dict = self._get_band_by_index(band_idx)
 
-                #step 5: get docs from the current band, for current hash
-                docs = _get_document_from_band(vector_hash, current_band_dict)
+                    #step 5: get docs from the current band's bucket that has the current vector_hash as it's key
+                    docs = _get_documents(vector_hash, current_band_dict)
 
-                #if we don't have docs, add the current doc to a new list and update band
-                if not docs:
-                    current_band_dict[vector_hash] = [document]
-                else:
-                    #step 6: check similarity of document pair
-
-                    #for now we only store one document per band, so we get the first document in the list
-                    #as it's the only one that should be stored
-                    candidate_document = current_band_dict[vector_hash][0]
-                    score = self._calculate_similarity_score(document, candidate_document)
-
-                    if self._documents_are_similar(score):
-                        results_dict = {
-                                "score": score,
-                                "match_found": True,
-                                "document_1": document.get_original_document(),
-                                "document_2": candidate_document.get_original_document()
-                            }
-                        return results_dict
+                    #if we don't have docs, add the current doc to a new list and update band dict
+                    if not docs:
+                        current_band_dict[vector_hash] = [document_to_examine]
                     else:
-                        results_dict = {
-                                "score": score,
-                                "match_found": False,
-                                "document_1": document.get_original_document(),
-                                "document_2": candidate_document.get_original_document()
-                            }
-                        if score > 0.0:
-                            return results_dict
+                        #step 6: check similarity of document pair
+
+                        #6a: update the current band's bucket that this current document to be examined hashed to
+                        _update_bucket(vector_hash, current_band_dict, document_to_examine)
+
+                        #6b: iterate through the current band's bucket of documents, calculate similarity
+                        # scores for each pair and yield results
+                        for doc in docs:
+                            score = self._calculate_similarity_score(document_to_examine, doc)
+
+                            if self._documents_are_similar(score):
+                                match_found = True
+                            else:
+                                match_found = False
+
+                            if score > 0.0:
+                                doc1 = document_to_examine.get_original_document()
+                                doc2 = doc.get_original_document()
+                                yield self._build_results_dict(score, match_found, doc1, doc2, band_idx)
+
+            # update starting value to get next vector
+            start = start + self.num_rows_per_band + 1
+
 
     #--- helper functions ----
+
+    def _build_results_dict(self, score, match_found, doc_1, doc_2, band_matched):
+        """
+            Build LSH results dictionary.
+            :param score:
+            :param match_found:
+            :param doc_1:
+            :param doc_2:
+            :return: results dict that contains candidate documents, threshold and LSH similarity score.
+        """
+        results_dict = {"score": score,
+                        "match_found": match_found,
+                        "document_1": doc_1,
+                        "document_2": doc_2,
+                        "threshold": self.threshold,
+                        "band_matched": band_matched}
+        return results_dict
 
     #TODO refactor so that users can specify their own hashing function(s)
     def _calculate_hash(self, obj):
@@ -119,16 +148,16 @@ class LshJaccard(LshBase):
 
         return None
 
-    def _get_vector(self, signatures, n):
+    def _get_vector(self, signatures, n, start):
         """
             Slices signatures into lists of n rows.
             :param signatures: list of minhash signatures
             :param n: number of rows to include in slice
             :return: list (vector)
         """
-        for i in xrange(0, len(signatures), n):
+        for i in xrange(start, len(signatures), n):
             #yes, technically this is a list slice not a vector
-            yield signatures[i:i+n]
+            return signatures[i:i+n]
 
     def _calculate_similarity_score(self, document_1, document_2):
         """
@@ -183,7 +212,7 @@ class LshJaccard(LshBase):
         return buckets
 
 
-# # for quick testing only...remote and add unit tests instead
+# for quick testing only...remote and add unit tests instead
 # if __name__ == '__main__':
 #
 #     from lsh.utils.similarity import jaccard_similarity
@@ -223,7 +252,7 @@ class LshJaccard(LshBase):
 #         #create document and run LSH for Jaccard Distance
 #         doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
 #
-#         results = lshj.run(doc_obj)
-#
-#         if results:
-#             print results
+#         for results in lshj.run(doc_obj):
+#             if results:
+#                 print results
+
