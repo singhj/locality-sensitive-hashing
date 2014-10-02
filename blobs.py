@@ -12,6 +12,8 @@ from lsh.utils.similarity import compute_positive_hash
 from lsh.shingles.shingles import _get_list_of_shingles
 
 max_bits = int(math.log(sys.maxsize+2, 2))
+url_file_pattern = re.compile('^."id":"([^"]*)","url":"([^"]*)".*')
+text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 
 class MainHandler(webapp2.RequestHandler):
     def get(self):
@@ -47,7 +49,7 @@ class ServeHandler(blobstore_handlers.BlobstoreDownloadHandler):
         blob_reader = blobstore.BlobReader(blob_key)
         zip_reader = zipfile.ZipFile(blob_reader)
         logging.info('contents: %s', zip_reader.namelist())
-        url_file_pattern = re.compile('^."id":"([^"]*)","url":"([^"]*)".*')
+        
         lno = 0
         urls = {}
         with zip_reader.open('url.out') as url_file_reader:
@@ -130,7 +132,6 @@ class TextWorker(webapp2.RequestHandler):
         dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blob_key)).get()
         (max_hashes, minhash_modulo, random_seeds) = (dataset.max_hashes, dataset.minhash_modulo, dataset.random_seeds)
         zip_reader = zipfile.ZipFile(blob_reader)
-        text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
         lno = 0
 
         start = time.time()
@@ -191,9 +192,34 @@ class Bucketize(webapp2.RequestHandler):
         logging.info('%d documents allocated to %d buckets, in %d seconds', 
                      doc_count, len(set(all_buckets)), (end - start))
 
+class ViewHandler(webapp2.RequestHandler):
+    def get(self, dataset_name, file_id):
+        def cleanup(text):
+            return text.replace('\\n', ' ')
+        for blob_info in blobstore.BlobInfo.all():
+            if blob_info.filename == dataset_name:
+                blob_key = blob_info.key()
+                blob_reader = blobstore.BlobReader(blob_key)
+                zip_reader = zipfile.ZipFile(blob_reader)
+
+                with zip_reader.open('text.out') as text_file_reader:
+                    for line in text_file_reader:
+                        found_pattern = text_file_pattern.search(line)
+                        if found_pattern:
+                            if file_id == found_pattern.group(1):
+                                self.response.out.write(cleanup(found_pattern.group(2)))
+                                return
+                    message = 'ID %s not found' % file_id
+                    self.response.out.write('<html><body><p>%s</p></body></html>' % message)
+                    return
+        message = 'Blob %s not found' % dataset_name
+        self.response.out.write('<html><body><p>%s</p></body></html>' % message)
+        return
+
 urls = [('/blobs', MainHandler),
         ('/upload_blob', UploadHandler),
         ('/serve_blob/([^/]+)?', ServeHandler),
         ('/text_worker', TextWorker),
         ('/bucketize', Bucketize),
+        ('/view/([^/]+)?/([^/]+)?', ViewHandler),
         ]
