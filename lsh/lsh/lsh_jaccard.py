@@ -71,7 +71,7 @@ class LshJaccard(LshBase):
                     if not docs:
                         current_band_dict[vector_hash] = [document_to_examine]
                     else:
-                        #step 6: check similarity of document pair
+                        #step 6: check similarity of each document pair
 
                         #6a: update the current band's bucket that this current document to be examined hashed to
                         _update_bucket(vector_hash, current_band_dict, document_to_examine)
