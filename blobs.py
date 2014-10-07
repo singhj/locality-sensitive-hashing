@@ -11,9 +11,28 @@ from google.appengine.ext import ndb
 from lsh.utils.similarity import compute_positive_hash
 from lsh.shingles.shingles import _get_list_of_shingles
 
+sys.path.insert(0, 'libs')
+from bs4 import BeautifulSoup
+
 max_bits = int(math.log(sys.maxsize+2, 2))
 url_file_pattern = re.compile('^."id":"([^"]*)","url":"([^"]*)".*')
 text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
+
+def all_blob_zips():
+    for blob_info in blobstore.BlobInfo.all():
+        blob_key = blob_info.key()
+        blob_reader = blobstore.BlobReader(blob_key)
+        yield blob_info, blob_reader    
+
+def all_matching_files(zip_reader, filename, pattern):
+        with zip_reader.open(filename) as file_reader:
+            (lno, mno) = (0, 0,)
+            for line in file_reader:
+                found_pattern = pattern.search(line)
+                lno += 1
+                if found_pattern:
+                    mno += 1
+                    yield lno, mno, found_pattern.group(1), found_pattern.group(2)
 
 class MainHandler(webapp2.RequestHandler):
     def get(self):
@@ -21,16 +40,12 @@ class MainHandler(webapp2.RequestHandler):
         self.response.out.write('<html><body>')
         self.response.out.write('<ol>')
 
-        for blob_info in blobstore.BlobInfo.all():
-            blob_key = blob_info.key()
-            blob_reader = blobstore.BlobReader(blob_key)
+        for blob_info, blob_reader in all_blob_zips():
             zip_reader = zipfile.ZipFile(blob_reader)
-            url_file_reader = zip_reader.open('url.out')
-            line_count = 0
-            while url_file_reader.readline():
-                line_count += 1
-            self.response.out.write('<li><a href="/serve_blob/%s">%s</a> %s %d urls</li>' % (blob_info.key(), blob_info.filename, [('%s: %s' % (p, str(getattr(blob_info, p)))) for p in blob_info._all_properties if p not in ('md5_hash','filename',)], line_count))
-            Dataset.create(blob_info.filename, blob_key)
+            for lno, mno, _id, text in all_matching_files(zip_reader, 'url.out', url_file_pattern): 
+                pass
+            dataset = Dataset.create(blob_info.filename, blob_info.key())
+            self.response.out.write('<li><a href="/serve_blob/%s">%s</a> %s %d urls</li>' % (blob_info.key(), blob_info.filename, [('%s: %s' % (p, str(getattr(blob_info, p)))) for p in blob_info._all_properties if p not in ('md5_hash','filename',)], lno))
 
         self.response.out.write('</ol>')
         self.response.out.write('<form action="%s" method="POST" enctype="multipart/form-data">' % upload_url)
@@ -50,15 +65,11 @@ class ServeHandler(blobstore_handlers.BlobstoreDownloadHandler):
         zip_reader = zipfile.ZipFile(blob_reader)
         logging.info('contents: %s', zip_reader.namelist())
         
-        lno = 0
         urls = {}
-        with zip_reader.open('url.out') as url_file_reader:
-            for line in url_file_reader:
-                lno += 1
-                found_pattern  = url_file_pattern.search(line)
-                urls[found_pattern.group(1)] = found_pattern.group(2)
-                if lno < 3:
-                    logging.info('    line %d: %s: %s', lno, found_pattern.group(1), found_pattern.group(2))
+        for lno, mno, _id, text in all_matching_files(zip_reader, 'url.out', url_file_pattern): 
+            urls[_id] = text
+            if lno < 3:
+                logging.info('    match %d (line %d): %s: %s', mno, lno, _id, text)
         logging.info('url.out: %d ids', len(urls.keys()))
         taskqueue.add(url='/text_worker', params={'key': blob_key})
         self.redirect('/blobs')
@@ -67,16 +78,20 @@ class Dataset(ndb.Model):
     filename = ndb.StringProperty()
     blob_key = ndb.BlobKeyProperty()
     random_seeds = ndb.IntegerProperty(repeated = True)
+    buckets = ndb.IntegerProperty(repeated = True)
     
     # The following parameters can be tuned via the Datastore Admin Interface
     rows = ndb.IntegerProperty()
     bands = ndb.IntegerProperty()
     buckets_per_band = ndb.IntegerProperty()
     max_hashes = ndb.IntegerProperty()
+    shingle_type = ndb.StringProperty(choices=('w', 'c4'))
     minhash_modulo = ndb.IntegerProperty()
     
     @classmethod
-    def create(cls, filename, blob_key, rows=5, bands=40, buckets_per_band=200, max_hashes=200, minhash_modulo=5000):
+    def create(cls, filename, blob_key, 
+               rows=7, bands=28, buckets_per_band=100, max_hashes=198, 
+               shingle_type='c4', minhash_modulo=5000):
         dataset = Dataset.query(cls.blob_key == blob_key).get()
         if not dataset:
             dataset = Dataset(filename = filename, 
@@ -86,29 +101,14 @@ class Dataset(ndb.Model):
                               bands = bands,
                               buckets_per_band = buckets_per_band,
                               max_hashes = max_hashes,
+                              shingle_type = shingle_type,
                               minhash_modulo = minhash_modulo,
                               )
         else:
             dataset.filename = filename
-            dataset.random_seeds = [random.getrandbits(max_bits) for _ in xrange(dataset.max_hashes)]
+            if len(dataset.random_seeds) != dataset.max_hashes:
+                dataset.random_seeds = [random.getrandbits(max_bits) for _ in xrange(dataset.max_hashes)]
         return dataset.put()
-    
-def calc_minhashes(max_hashes, minhash_modulo, random_seeds, shingles, log_count = 0):
-    def positive_hash(shingle):
-        h = struct.unpack('<i',shingle)[0]
-        return  h % ((sys.maxsize + 1) * 2)
-    minhashes = [sys.maxsize for _ in xrange(max_hashes)]
-    logged = 0
-    for shingle in shingles:
-        for hno in xrange(max_hashes):
-#             h_value = operator.xor(compute_positive_hash(shingle), random_seeds[hno]) 
-#            h_value = operator.xor(positive_hash(shingle), random_seeds[hno])
-            h_value = operator.xor(positive_hash(shingle), random_seeds[hno]) % minhash_modulo
-            minhashes[hno] = min(h_value, minhashes[hno])
-        logged += 1
-        if logged <= log_count:
-            logging.info('mh (%s) = %s', shingle, [minhashes[i] for i in xrange(min(8, max_hashes))])
-    return minhashes
 
 class Document(ndb.Model):
     minhashes = ndb.IntegerProperty(repeated = True)
@@ -116,58 +116,89 @@ class Document(ndb.Model):
 
 class TextWorker(webapp2.RequestHandler):
     def post(self): # should run at most 1/s due to entity group limit
-        def preprocess_text(text):
-            # Remove stuff between script tags
-            pscript = re.compile('<script.*?>.*?</script.*?>')
-            text = pscript.sub('', text.lower())
-            # Remove non-alphanumeric characters
+
+        def calc_minhashes(_id, text, mno, ds_key, sh_type, hashes, seeds, modulo, match_count = 0):
             symbols = re.compile('\W+')
-            text = symbols.sub(' ', text)
-            # Remove spurious white space characters
-            text = ' '.join(text.split())
-            return text
+            ##########################################
+            def parse_text(text):
+                soup = BeautifulSoup(text.replace('\\n',' '))
+                [s.extract() for s in soup(['script', 'style'])]
+                text = soup.get_text(separator=' ', strip=True)
+                text = symbols.sub(' ', text.lower())
+                # Remove spurious white space characters
+                text = ' '.join(text.split())
+                return text
+            ##########################################
+            def minhashes_for_shingles(shingles, sh_type, hashes, seeds, modulo):
+                def calc_onehash(sh_type, shingle, seed, modulo):
+                    def c4_hash(shingle):
+                        h = struct.unpack('<i',shingle)[0]
+                        return  h % ((sys.maxsize + 1) * 2)
+                    if sh_type == 'c4':
+                        return operator.xor(c4_hash(shingle), long(seed)) % modulo
+                    else:
+                        return operator.xor(compute_positive_hash(shingle), long(seed)) % modulo
+
+                minhashes = [sys.maxsize for _ in xrange(hashes)]
+                logged = 0
+                for shingle in shingles:
+                    for hno in xrange(hashes):
+                        h_value = calc_onehash(sh_type, shingle, seeds[hno], modulo)
+                        minhashes[hno] = min(h_value, minhashes[hno])
+                    logged += 1
+                    if logged <= match_count:
+                        logging.info('mh (%s) = %s', shingle, [minhashes[i] for i in xrange(min(8, hashes))])
+                return minhashes
+            ##########################################
+            t0 = time.time()
+            text = parse_text(text)
+    
+            t1 = time.time()
+            shingles = text.split() if sh_type=='w' else set(_get_list_of_shingles(text))
+    
+            t2 = time.time()
+            doc = Document.get_or_insert(_id, parent = ds_key)
+            doc.minhashes = minhashes_for_shingles(shingles, sh_type, hashes, seeds, modulo)
+            if mno < match_count:
+                logging.info('mh = %s', [doc.minhashes[i] for i in xrange(min(8, hashes))])
+            doc.put()
+    
+            t3 = time.time()
+            return t0, t1, t2, t3
+    
+
             
         blob_key = self.request.get('key')
         blob_reader = blobstore.BlobReader(blob_key)
         dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blob_key)).get()
-        (max_hashes, minhash_modulo, random_seeds) = (dataset.max_hashes, dataset.minhash_modulo, dataset.random_seeds)
         zip_reader = zipfile.ZipFile(blob_reader)
-        lno = 0
 
-        start = time.time()
+        ndb.delete_multi(Document.query(ancestor=dataset.key).fetch(999999, keys_only=True))
+        dataset.buckets = []
+        dataset.put()
+
+        t_parsing = 0
         t_shingle = 0
         t_minhash = 0
-        with zip_reader.open('text.out') as text_file_reader:
-            for line in text_file_reader:
-                found_pattern = text_file_pattern.search(line)
-                if found_pattern:
-                    lno += 1
-                    t0 = time.time()
-                    text = found_pattern.group(2)
-                    orig_len = len(text)
-                    text = preprocess_text(text)
-                    text_len = len(text)
-                    shingles = set(_get_list_of_shingles(text))
-                    t1 = time.time()
-                    if lno < 3:
-                        minhashes = calc_minhashes(max_hashes, minhash_modulo, random_seeds, shingles, 3)
-                        logging.info('mh = %s', [minhashes[i] for i in xrange(min(8, dataset.max_hashes))])
-                    else:
-                        minhashes = calc_minhashes(max_hashes, minhash_modulo, random_seeds, shingles)
-                    doc = Document.get_or_insert(found_pattern.group(1), parent = dataset.key)
-                    doc.minhashes = minhashes
-                    doc.put()
-                    t2 = time.time()
-                    t_shingle += t1 - t0
-                    t_minhash += t2 - t1
-                    if lno < 3:
-                        logging.info('    line %d: %s orig: %d, pruned %d, shingles %d', 
-                                     lno, found_pattern.group(1), orig_len, text_len, len(shingles))
-                    end = time.time()
-                    if (end - start) > 9*60:
-                        break
-        logging.info('processed %d ids in %d seconds total, %d secs shingling, %d secs minhashing', 
-                     lno, (end - start), t_shingle, t_minhash)
+        start = time.time()
+        ds_key = dataset.key
+        sh_type = dataset.shingle_type
+        hashes = dataset.max_hashes
+        modulo = dataset.minhash_modulo
+        seeds = list(dataset.random_seeds)
+
+        for lno, mno, _id, text in all_matching_files(zip_reader, 'text.out', text_file_pattern):
+#             if lno < 2:
+#                 logging.info('text = %s', text)
+            (t0, t1, t2, t3) = calc_minhashes(_id, text, mno, ds_key, sh_type, hashes, seeds, modulo, match_count = (3 if mno<3 else 0))
+            t_parsing += t1 - t0
+            t_shingle += t2 - t1
+            t_minhash += t3 - t2
+            end = time.time()
+            if (end - start) > 9*60:
+                break
+        logging.info('processed %d ids (%d lines) in %d seconds total, %d secs parsing, %d secs shingling, %d secs minhashing', 
+                     mno, lno, (end - start), t_parsing, t_shingle, t_minhash)
         taskqueue.add(url='/bucketize', params={'key': blob_key})
 
 class Bucketize(webapp2.RequestHandler):
@@ -191,24 +222,20 @@ class Bucketize(webapp2.RequestHandler):
         end = time.time()
         logging.info('%d documents allocated to %d buckets, in %d seconds', 
                      doc_count, len(set(all_buckets)), (end - start))
+        dataset.buckets = list(set(all_buckets))
+        dataset.put()
 
 class ViewHandler(webapp2.RequestHandler):
     def get(self, dataset_name, file_id):
         def cleanup(text):
             return text.replace('\\n', ' ')
-        for blob_info in blobstore.BlobInfo.all():
+        for blob_info, blob_reader in all_blob_zips():
             if blob_info.filename == dataset_name:
-                blob_key = blob_info.key()
-                blob_reader = blobstore.BlobReader(blob_key)
                 zip_reader = zipfile.ZipFile(blob_reader)
-
-                with zip_reader.open('text.out') as text_file_reader:
-                    for line in text_file_reader:
-                        found_pattern = text_file_pattern.search(line)
-                        if found_pattern:
-                            if file_id == found_pattern.group(1):
-                                self.response.out.write(cleanup(found_pattern.group(2)))
-                                return
+                for lno, mno, _id, text in all_matching_files(zip_reader, 'text.out', text_file_pattern):
+                    if file_id == _id:
+                        self.response.out.write(cleanup(text))
+                        return
                     message = 'ID %s not found' % file_id
                     self.response.out.write('<html><body><p>%s</p></body></html>' % message)
                     return
