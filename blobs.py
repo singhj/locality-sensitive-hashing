@@ -25,14 +25,14 @@ def all_blob_zips():
         yield blob_info, blob_reader    
 
 def all_matching_files(zip_reader, filename, pattern):
-        with zip_reader.open(filename) as file_reader:
-            (lno, mno) = (0, 0,)
-            for line in file_reader:
-                found_pattern = pattern.search(line)
-                lno += 1
-                if found_pattern:
-                    mno += 1
-                    yield lno, mno, found_pattern.group(1), found_pattern.group(2)
+    with zip_reader.open(filename) as file_reader:
+        (lno, mno) = (0, 0,)
+        for line in file_reader:
+            found_pattern = pattern.search(line)
+            lno += 1
+            if found_pattern:
+                mno += 1
+                yield lno, mno, found_pattern.group(1), found_pattern.group(2)
 
 class MainHandler(webapp2.RequestHandler):
     def get(self):
@@ -41,9 +41,16 @@ class MainHandler(webapp2.RequestHandler):
         self.response.out.write('<ol>')
 
         for blob_info, blob_reader in all_blob_zips():
-            zip_reader = zipfile.ZipFile(blob_reader)
-            for lno, mno, _id, text in all_matching_files(zip_reader, 'url.out', url_file_pattern): 
-                pass
+            try:
+                zip_reader = zipfile.ZipFile(blob_reader)
+                for lno, mno, _id, text in all_matching_files(zip_reader, 'url.out', url_file_pattern): 
+                    pass
+            except zipfile.BadZipfile:
+                logging.warning('Bad zip: %s', blob_info.filename)
+                continue
+            except KeyError:
+                logging.warning('Missing url.out file in the archive: %s', blob_info.filename)
+                continue
             dataset = Dataset.create(blob_info.filename, blob_info.key())
             self.response.out.write('<li><a href="/serve_blob/%s">%s</a> %s %d urls</li>' % (blob_info.key(), blob_info.filename, [('%s: %s' % (p, str(getattr(blob_info, p)))) for p in blob_info._all_properties if p not in ('md5_hash','filename',)], lno))
 

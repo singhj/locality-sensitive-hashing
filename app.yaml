@@ -19,8 +19,8 @@ handlers:
   static_files: static/js/custom.js
   upload: static/js/custom.js
 
-- url: /mapreduce(/.*)?
-  script: mapreduce.main.APP
+#- url: /mapreduce(/.*)?
+#  script: libs.mapreduce.main.APP
 
 - url: /.*
   script: main.application
@@ -28,6 +28,9 @@ handlers:
 
 env_variables:
  GAE_USE_SOCKETS_HTTPLIB : True
+
+includes:
+- mapreduce/include.yaml
 
 libraries:
 - name: webapp2
