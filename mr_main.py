@@ -187,13 +187,16 @@ def split_into_words(s):
     s = re.sub(r"[_0-9]+", " ", s)
     return s.split()
 
+logged = {}
 
 def word_count_map(data):
     """Word count map function."""
     (entry, text_fn) = data
     text = text_fn()
+    
+    logged[entry] = 1
 
-    logging.debug("Got %s", entry.filename)
+    logging.warning("word_count_map Got %s blob (%s)", entry.filename, text_fn().replace('\\n', ' ') if len(logged.keys()) < 3 else '...')
     for s in split_into_sentences(text):
         for w in split_into_words(s.lower()):
             yield (w, "")
@@ -262,7 +265,7 @@ class WordCountPipeline(base_handler.PipelineBase):
     """
 
     def run(self, filekey, blobkey):
-        logging.debug("filename is %s" % filekey)
+        logging.warning("filename is %s \nblobkey is %s" % (filekey, blobkey))
         output = yield mapreduce_pipeline.MapreducePipeline(
             "word_count",
             "mr_main.word_count_map",

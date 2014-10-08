@@ -26,9 +26,13 @@ function updateForm(filekey, blobkey, filename) {
   $('#jobName').text(filename);
   $('#filekey').val(filekey);
   $('#blobkey').val(blobkey);
+  $('#filename').val(filename);
+  $('#ds_key').val(filekey);  
 
   $('#word_count').removeAttr('disabled');
   $('#index').removeAttr('disabled');
   $('#phrases').removeAttr('disabled');
+  $('#run_lsh').removeAttr('disabled');
+  
 }
 

@@ -2,11 +2,16 @@ import sys, re, math, random, struct, zipfile
 import urllib, webapp2
 import logging
 import operator, time
+import jinja2
 
 from google.appengine.ext import blobstore
 from google.appengine.ext.webapp import blobstore_handlers
 from google.appengine.api import taskqueue
 from google.appengine.ext import ndb
+from google.appengine.api import users
+
+from mapreduce import base_handler
+from mapreduce import mapreduce_pipeline
 
 from lsh.utils.similarity import compute_positive_hash
 from lsh.shingles.shingles import _get_list_of_shingles
@@ -35,35 +40,47 @@ def all_matching_files(zip_reader, filename, pattern):
                 yield lno, mno, found_pattern.group(1), found_pattern.group(2)
 
 class MainHandler(webapp2.RequestHandler):
+    template_env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"),
+                                      autoescape=True)
+
     def get(self):
-        upload_url = blobstore.create_upload_url('/upload_blob')
-        self.response.out.write('<html><body>')
-        self.response.out.write('<ol>')
+        user = users.get_current_user()
+        username = user.nickname()
 
-        for blob_info, blob_reader in all_blob_zips():
-            try:
-                zip_reader = zipfile.ZipFile(blob_reader)
-                for lno, mno, _id, text in all_matching_files(zip_reader, 'url.out', url_file_pattern): 
-                    pass
-            except zipfile.BadZipfile:
-                logging.warning('Bad zip: %s', blob_info.filename)
-                continue
-            except KeyError:
-                logging.warning('Missing url.out file in the archive: %s', blob_info.filename)
-                continue
-            dataset = Dataset.create(blob_info.filename, blob_info.key())
-            self.response.out.write('<li><a href="/serve_blob/%s">%s</a> %s %d urls</li>' % (blob_info.key(), blob_info.filename, [('%s: %s' % (p, str(getattr(blob_info, p)))) for p in blob_info._all_properties if p not in ('md5_hash','filename',)], lno))
+        results = Dataset.query()
+        items = [result for result in results]
+        for item in items:
+            item.ds_key = item.key.urlsafe()
+        length = len(items)
 
-        self.response.out.write('</ol>')
-        self.response.out.write('<form action="%s" method="POST" enctype="multipart/form-data">' % upload_url)
-        self.response.out.write("""Upload File: <input type="file" name="file"><br> <input type="submit"
-            name="submit" value="Submit"> </form></body></html>""")
+        upload_url = blobstore.create_upload_url("/upload_blob")
+
+        self.response.out.write(self.template_env.get_template("blobs.html").render(
+            {"username": username,
+             "items": items,
+             "length": length,
+             "upload_url": upload_url}))
+
+    def post(self):
+        filename = self.request.get("filename")
+        blob_key = self.request.get("blobkey")
+        ds_key   = self.request.get("ds_key")
+
+        if self.request.get("run_lsh"):
+            pipeline = LshPipeline(filename, blob_key, ds_key)
+
+        pipeline.start()
+        self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
 
 class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
     def post(self):
-        upload_files = self.get_uploads('file')  # 'file' is file upload field in the form
+        upload_files = self.get_uploads("file")
         blob_info = upload_files[0]
-        self.redirect('/serve_blob/%s' % blob_info.key())
+        blob_key = blob_info.key()
+        logging.info('filename %s key %s', blob_info.filename, blob_key)
+        Dataset.create(blob_info.filename, blob_key)
+
+        self.redirect("/blobs")
 
 class ServeHandler(blobstore_handlers.BlobstoreDownloadHandler):
     def get(self, resource):
@@ -91,14 +108,14 @@ class Dataset(ndb.Model):
     rows = ndb.IntegerProperty()
     bands = ndb.IntegerProperty()
     buckets_per_band = ndb.IntegerProperty()
-    max_hashes = ndb.IntegerProperty()
     shingle_type = ndb.StringProperty(choices=('w', 'c4'))
     minhash_modulo = ndb.IntegerProperty()
     
     @classmethod
     def create(cls, filename, blob_key, 
-               rows=7, bands=28, buckets_per_band=100, max_hashes=198, 
+               rows=5, bands=40, buckets_per_band=100, 
                shingle_type='c4', minhash_modulo=5000):
+        max_hashes = rows * bands
         dataset = Dataset.query(cls.blob_key == blob_key).get()
         if not dataset:
             dataset = Dataset(filename = filename, 
@@ -107,14 +124,11 @@ class Dataset(ndb.Model):
                               rows = rows,
                               bands = bands,
                               buckets_per_band = buckets_per_band,
-                              max_hashes = max_hashes,
                               shingle_type = shingle_type,
                               minhash_modulo = minhash_modulo,
                               )
         else:
             dataset.filename = filename
-            if len(dataset.random_seeds) != dataset.max_hashes:
-                dataset.random_seeds = [random.getrandbits(max_bits) for _ in xrange(dataset.max_hashes)]
         return dataset.put()
 
 class Document(ndb.Model):
@@ -172,9 +186,7 @@ class TextWorker(webapp2.RequestHandler):
     
             t3 = time.time()
             return t0, t1, t2, t3
-    
 
-            
         blob_key = self.request.get('key')
         blob_reader = blobstore.BlobReader(blob_key)
         dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blob_key)).get()
@@ -207,6 +219,136 @@ class TextWorker(webapp2.RequestHandler):
         logging.info('processed %d ids (%d lines) in %d seconds total, %d secs parsing, %d secs shingling, %d secs minhashing', 
                      mno, lno, (end - start), t_parsing, t_shingle, t_minhash)
         taskqueue.add(url='/bucketize', params={'key': blob_key})
+
+logged = {}
+symbols = re.compile('\W+')
+
+def lsh_map(data):
+    def calc_minhashes(_id, text, ds_key, sh_type, hashes, seeds, modulo):
+        ##########################################
+        def parse_text(text):
+            soup = BeautifulSoup(text.replace('\\n',' '))
+            [s.extract() for s in soup(['script', 'style'])]
+            text = soup.get_text(separator=' ', strip=True)
+            text = symbols.sub(' ', text.lower())
+            # Remove spurious white space characters
+            text = ' '.join(text.split())
+            return text
+        ##########################################
+        def minhashes_for_shingles(shingles, sh_type, hashes, seeds, modulo):
+            def calc_onehash(sh_type, shingle, seed, modulo):
+                def c4_hash(shingle):
+                    h = struct.unpack('<i',shingle)[0]
+                    return  h % ((sys.maxsize + 1) * 2)
+                if sh_type == 'c4':
+                    return operator.xor(c4_hash(shingle), long(seed)) % modulo
+                else:
+                    return operator.xor(compute_positive_hash(shingle), long(seed)) % modulo
+
+            minhashes = [sys.maxsize for _ in xrange(hashes)]
+            logged = 0
+            for shingle in shingles:
+                for hno in xrange(hashes):
+                    h_value = calc_onehash(sh_type, shingle, seeds[hno], modulo)
+                    minhashes[hno] = min(h_value, minhashes[hno])
+                logged += 1
+            return minhashes
+        ##########################################
+        text = parse_text(text)
+        shingles = text.split() if sh_type=='w' else set(_get_list_of_shingles(text))
+        minhashes = minhashes_for_shingles(shingles, sh_type, hashes, seeds, modulo)
+        doc = Document.get_or_insert(_id, parent = ds_key)
+        doc.minhashes = minhashes
+        doc.put()
+        return minhashes
+    """LSH map function."""
+    
+#     logging.warning('LSH Map Input %s ', data)
+    (blob_key, file_no, line) = (data[0][0], data[0][1], data[1])
+    found_pattern = text_file_pattern.search(line)
+    if not found_pattern:
+        return
+    (_id, text) = (found_pattern.group(1), found_pattern.group(2))
+    dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blob_key)).get()
+    ds_key = dataset.key
+    
+    time_now = int(time.time())
+    start = time.time()
+    
+    (rows, bands) = (dataset.rows, dataset.bands)
+    hashes = rows * bands
+    if len(dataset.random_seeds) < hashes:
+        dataset.random_seeds = [random.getrandbits(max_bits) for _ in xrange(hashes)]
+        dataset.put()
+    
+    sh_type = dataset.shingle_type
+    modulo = dataset.minhash_modulo
+    seeds = list(dataset.random_seeds)
+
+    minhashes = calc_minhashes(_id, text, ds_key, sh_type, hashes, seeds, modulo)
+
+    buckets = []
+    buckets_per_band = dataset.buckets_per_band
+    for band in xrange(dataset.bands):
+        minhashes_in_band = [minhashes[band*rows + row] for row in xrange(rows)]
+        if len(set(minhashes_in_band)) <= 1:
+            buckets.append( (band * buckets_per_band) + hash(minhashes_in_band[0]) % buckets_per_band )
+
+    end = time.time()
+    if 0 == (time_now % 20):
+        logging.info('id %s, length %d, time %d', _id, len(text), int(end - start))
+    
+    for bkt in buckets:
+        yield (bkt, '/view/%s/%s' % (dataset.filename, _id))
+
+def lsh_bucket(key, values):
+    """LSH reduce function."""
+    yield (key, values)
+
+class LshPipeline(base_handler.PipelineBase):
+    """A pipeline to run LSH.
+
+    Args:
+      blobkey: blobkey to process as string. Should be a zip archive with
+        text files inside.
+    """
+
+    def run(self, filename, blobkey, ds_key):
+        logging.warning("filename is %s \nblobkey is %s\nds_key is %s" % (filename, blobkey, ds_key))
+#        dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blobkey)).get()
+        dataset = ndb.Key(urlsafe=ds_key).get()
+        ndb.delete_multi(Document.query(ancestor=dataset.key).fetch(999999, keys_only=True))
+        dataset.buckets = []
+        dataset.put()
+        output = yield mapreduce_pipeline.MapreducePipeline(
+            "locality_sensitive_hashing",
+            "blobs.lsh_map",
+            "blobs.lsh_bucket",
+#             'mapreduce.input_readers.BlobstoreZipInputReader'
+            'mapreduce.input_readers.BlobstoreZipLineInputReader', 
+#             "blobs.ZipInputReaderWithPayload",
+            "mapreduce.output_writers.BlobstoreOutputWriter",
+            mapper_params={
+                "blob_keys": blobkey,
+#                 'payload':  ds_key,
+            },
+            reducer_params={
+                "mime_type": "text/plain",
+            },
+            shards=16)
+        yield StoreOutput("LSH", filename, output)
+
+class StoreOutput(base_handler.PipelineBase):
+    """A pipeline to store the result of the MapReduce job in the database.
+
+    Args:
+      mr_type: the type of mapreduce job run (e.g., WordCount, Index)
+      encoded_key: the DB key corresponding to the metadata of this job
+      output: the blobstore location where the output of the job is stored
+    """
+
+    def run(self, mr_type, encoded_key, output):
+        logging.debug("output is %s" % str(output))
 
 class Bucketize(webapp2.RequestHandler):
     def post(self):
@@ -243,12 +385,13 @@ class ViewHandler(webapp2.RequestHandler):
                     if file_id == _id:
                         self.response.out.write(cleanup(text))
                         return
-                    message = 'ID %s not found' % file_id
-                    self.response.out.write('<html><body><p>%s</p></body></html>' % message)
-                    return
+                message = 'ID %s not found' % file_id
+                self.response.out.write('<html><body><p>%s</p></body></html>' % message)
+                return
         message = 'Blob %s not found' % dataset_name
         self.response.out.write('<html><body><p>%s</p></body></html>' % message)
         return
+
 
 urls = [('/blobs', MainHandler),
         ('/upload_blob', UploadHandler),
