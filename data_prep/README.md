@@ -12,5 +12,5 @@ To run it,
 prepare_blobstore_zips abc.zip def.zip
 ```
 
-For each file on the command line, it will create a corresponding blobstore.zip file (`abc.blobstore.zip`, etc).
-In addition to the files in the original zip, the blobstore.zip file will contain `.txt` files for each ID that has html.
+For each file on the command line, it will create a corresponding chunked.zip file (`abc.chunked.zip`, etc).
+The chunked.zip file will contain `.txt` files for each ID that has html.
