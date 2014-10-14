@@ -30,9 +30,10 @@ class BlobDataset(Dataset):
                               bands = bands,
                               buckets_per_band = buckets_per_band,
                               shingle_type = shingle_type,
-                              minhash_modulo = minhash_modulo,
-                              )
-
+                              minhash_modulo = minhash_modulo)
+        else:
+            dataset.filename = filename
+            
         return dataset.put()
 
     @classmethod
