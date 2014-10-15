@@ -33,7 +33,7 @@ class BlobDataset(Dataset):
                               minhash_modulo = minhash_modulo)
         else:
             dataset.filename = filename
-            
+
         return dataset.put()
 
     @classmethod
