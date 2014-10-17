@@ -24,3 +24,6 @@ def get_reader(key):
 def get_info(key_objs):
 
     return blobstore.BlobInfo.get(key_objs)
+
+def get_blob_key(key):
+    return blobstore.BlobKey(key)
