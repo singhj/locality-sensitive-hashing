@@ -9,10 +9,11 @@ from repositories.gae.blobstore import create_upload_url, get_blob_key
 from pipelines.gae.lsh_pipelines import LshBlobPipeline
 from pipelines.gae.map_reduce_pipeline_factory import MapReducePipelineFactory
 from lsh_map_reduce.lsh_map_base import LshMapBase
+from lsh_map_reduce.lsh_reduce_base import LshReduceBase
 from utils.zip_utils import all_matching_files
 
-
 symbols = re.compile('\W+')
+text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 
 def parse_text(text):
     soup = BeautifulSoup(text.replace('\\n',' '))
@@ -62,7 +63,7 @@ class MainHandler(webapp2.RequestHandler):
 
         return MapReducePipelineFactory("locality_sensitive_hashing",
             "peer_belt_driver.PeerLshMap.map",
-            "lsh_map_reduce.lsh_reduce_base.LshReduceBase.reduce",
+            "peer_belt_driver.PeerLshReduce.reduce",
             'mapreduce.input_readers.BlobstoreZipLineInputReader',
             "mapreduce.output_writers.BlobstoreOutputWriter",
             mapper_params={
@@ -88,6 +89,23 @@ class PeerLshMap(LshMapBase):
 
         return (dataset, _id, text)
 
+    @classmethod
+    def parsed_text(cls, text):
+        soup = BeautifulSoup(text.replace('\\n',' '))
+        [s.extract() for s in soup(['script', 'style'])]
+        text = soup.get_text(separator=' ', strip=True)
+        text = symbols.sub(' ', text.lower())
+
+        # Remove spurious white space characters
+        text = ' '.join(text.split())
+        return text
+
+class PeerLshReduce(LshReduceBase):
+
+    @classmethod
+    def reduce(cls, key, values):
+        yield (key, values)
+
 class ViewHandler(webapp2.RequestHandler):
     def get(self, dataset_name, file_id):
         def cleanup(text):
@@ -110,8 +128,8 @@ class ViewHandler(webapp2.RequestHandler):
 from handlers.gae.upload_handler import UploadHandler
 from handlers.gae.server_handler import ServeHandler
 
-urls = [('/blobs', MainHandler),
-        ('/upload_blob', UploadHandler),
-        ('/serve_blob/([^/]+)?', ServeHandler),
-        ('/view/([^/]+)?/([^/]+)?', ViewHandler),
+urls = [('/blobs2', MainHandler),
+        ('/upload_blob2', UploadHandler),
+        ('/serve_blob2/([^/]+)?', ServeHandler),
+        ('/view2/([^/]+)?/([^/]+)?', ViewHandler),
         ]

@@ -3,4 +3,4 @@ class LshReduceBase(object):
 
     @classmethod
     def reduce(cls, key, values):
-        yield (key, values)
+        raise NotImplementedError("Subclasses should implement reduce()")
