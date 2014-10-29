@@ -66,8 +66,8 @@ class MainHandler(webapp2.RequestHandler):
     def get_pipeline(self, blob_key):
 
         return MapReducePipelineFactory("locality_sensitive_hashing",
-            "peer_belt_driver.PeerLshMap.map",
-            "peer_belt_driver.PeerLshReduce.reduce",
+            "peer_belt_driver.map",
+            "peer_belt_driver.reduce",
             'mapreduce.input_readers.BlobstoreZipLineInputReader',
             "mapreduce.output_writers.BlobstoreOutputWriter",
             mapper_params={
@@ -109,6 +109,13 @@ class PeerLshReduce(LshReduceBase):
     @classmethod
     def reduce(cls, key, values):
         yield (key, values)
+
+#our wrapper functions that call the PeerBelt specific map and reduce functions
+def map(data):
+    PeerLshMap.map(data)
+
+def reduce(key, values):
+    PeerLshReduce.reduce(key, values)
 
 class ViewHandler(webapp2.RequestHandler):
     def get(self, dataset_name, file_id):
