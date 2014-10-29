@@ -8,8 +8,8 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
         blob_info = upload_files[0]
         blob_key = blob_info.key()
 
-        logging.info('filename %s key %s', blob_info.filename, blob_key)
+        logging.info('(REFACTORED) filename %s key %s', blob_info.filename, blob_key)
 
-        BlobDataset.create(blob_key, {"filename" : blob_info.filename})
+        BlobDataset.create(blob_key, filename=blob_info.filename)
 
-        self.redirect("/blobs")
+        self.redirect("/blobs2")

@@ -25,3 +25,14 @@ class MapReducePipelineFactory(object):
             mapper_params = self.mapper_params,
             reducer_params = self.reducer_params,
             shards = self.shards)
+
+    def create2(self):
+        return {
+            "job_name": self.job_name,
+            "mapper": self.mapper,
+            "reducer":self.reducer,
+            "input":self.input,
+            "output":self.output,
+            "mapper_params":self.mapper_params,
+            "reducer_params":self.reducer_params,
+            "shards":self.shards}

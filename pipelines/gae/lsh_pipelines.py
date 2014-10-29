@@ -2,6 +2,7 @@ from pipelines.gae.store_output import StoreOutput
 from mapreduce import base_handler
 from google.appengine.ext import ndb
 import logging
+from mapreduce import mapreduce_pipeline
 
 class LshBlobPipeline(base_handler.PipelineBase):
     """A pipeline to run LSH that reads and writes to blobstore
@@ -18,7 +19,15 @@ class LshBlobPipeline(base_handler.PipelineBase):
         dataset = ndb.Key(urlsafe=ds_key).get()
         dataset.buckets = []
         dataset.put()
-        output = yield map_reduce_pipeline
+        output = yield mapreduce_pipeline.MapreducePipeline(
+            map_reduce_pipeline.get("job_name"),
+            map_reduce_pipeline.get("mapper"),
+            map_reduce_pipeline.get("reducer"),
+            map_reduce_pipeline.get("input"),
+            map_reduce_pipeline.get("output"),
+            mapper_params= map_reduce_pipeline.get("mapper_params"),
+            reducer_params=map_reduce_pipeline.get("reducer_params"),
+            shards=map_reduce_pipeline.get("shards"))
 
         yield StoreOutput('OpenLSH', ds_key, output)
 

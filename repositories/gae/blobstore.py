@@ -1,5 +1,6 @@
 from google.appengine.ext import blobstore
 import urllib
+import logging
 
 def get_all_blob_info():
     for blob_info in blobstore.BlobInfo.all():

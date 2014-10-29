@@ -2,7 +2,7 @@ import webapp2, re, zipfile
 import jinja2
 from google.appengine.api import users
 from bs4 import BeautifulSoup
-
+import logging
 from repositories.gae.blobstore import get_all_blob_info
 from repositories.gae.blob_dataset import BlobDataset
 from repositories.gae.blobstore import create_upload_url, get_blob_key
@@ -29,6 +29,7 @@ class MainHandler(webapp2.RequestHandler):
     template_env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"),
                                       autoescape=True)
     def get(self):
+        logging.info('Peer Belt Driver get method called!')
         user = users.get_current_user()
         username = user.nickname()
 
@@ -39,9 +40,9 @@ class MainHandler(webapp2.RequestHandler):
             item.ds_key = item.key.urlsafe()
         length = len(items)
 
-        upload_url = create_upload_url("upload_blob")
+        upload_url = create_upload_url("upload_blob2")
 
-        self.response.out.write(self.template_env.get_template("blobs.html").render(
+        self.response.out.write(self.template_env.get_template("blobs2.html").render(
             {"username": username,
              "items": items,
              "length": length,
@@ -52,9 +53,12 @@ class MainHandler(webapp2.RequestHandler):
         blob_key = self.request.get("blobkey")
         ds_key   = self.request.get("ds_key")
 
-        map_reduce_pipeline = self.get_pipeline(blob_key)
+        map_reduce_pipeline_dict = self.get_pipeline(blob_key)
 
-        pipeline = LshBlobPipeline(filename, blob_key, ds_key, map_reduce_pipeline)
+        logging.info('filename %s key %s', filename, blob_key)
+        logging.info(map_reduce_pipeline_dict)
+
+        pipeline = LshBlobPipeline(filename, blob_key, ds_key, map_reduce_pipeline_dict)
         pipeline.start()
 
         self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
@@ -72,7 +76,7 @@ class MainHandler(webapp2.RequestHandler):
             reducer_params={
                 "mime_type": "text/plain",
             },
-            shards=16)
+            shards=16).create2()
 
 class PeerLshMap(LshMapBase):
 

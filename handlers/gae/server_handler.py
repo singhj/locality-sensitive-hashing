@@ -19,4 +19,4 @@ class ServeHandler(blobstore_handlers.BlobstoreDownloadHandler):
                 logging.info('    match %d (line %d): %s: %s', mno, lno, _id, text)
         logging.info('url.out: %d ids', len(urls.keys()))
 
-        self.redirect('/blobs')
+        self.redirect('/blobs2')
