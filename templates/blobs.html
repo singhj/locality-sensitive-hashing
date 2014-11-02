@@ -16,6 +16,8 @@
           <td></td>
           <td>name</td>
           <td>output</td>
+          <td>analyze</td>
+          <td>analysis</td>
         </tr>
         {% for item in items %}
         <tr>
@@ -25,6 +27,16 @@
           <td>
             {% if item.output_link %}
             <a href="{{ item.output_link }}">view</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.output_link %}
+            <a href="/calc_dists{{ item.output_link }}">kick off</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.result_link %}
+            <a href="{{ item.result_link }}">result</a>
             {% endif %}
           </td>
         </tr>
