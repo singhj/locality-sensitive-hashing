@@ -16,13 +16,13 @@
           <td></td>
           <td>name</td>
           <td>output</td>
-          <td>analyze</td>
           <td>analysis</td>
+          <td>counts</td>
         </tr>
         {% for item in items %}
         <tr>
-          <td><input type="radio" onclick="updateForm('{{ item.ds_key }}',
-            '{{ item.blob_key }}', '{{ item.filename }}');"></td>
+          <td><input type="radio" onclick="updateForm('{{ item.key.urlsafe() }}',
+            '{{ item.blob_key }}', '{{ item.filename }}', '{{ item.output_link }}', '{{ item.result_link }}');"></td>
           <td>{{ item.filename }}</td>
           <td>
             {% if item.output_link %}
@@ -30,13 +30,13 @@
             {% endif %}
           </td>
           <td>
-            {% if item.output_link %}
-            <a href="/calc_dists{{ item.output_link }}">kick off</a>
+            {% if item.result_link %}
+            <a href="{{ item.result_link }}">view</a>
             {% endif %}
           </td>
           <td>
-            {% if item.result_link %}
-            <a href="{{ item.result_link }}">result</a>
+            {% if item.count_link %}
+            <a href="{{ item.count_link }}">view</a>
             {% endif %}
           </td>
         </tr>
@@ -52,11 +52,14 @@
         <input type="hidden" name="filename" id="filename" value="">
         <input type="hidden" name="blobkey" id="blobkey" value="">
         <input type="hidden" name="ds_key" id="ds_key" value="">
+        <input type="hidden" name="output_link" id="output_link" value="">
         <br />
         <br />
         <table>
           <tr>
             <td><input type="submit" id="run_lsh" name="run_lsh" value="Run LSH" disabled="true"></td>
+            <td><input type="submit" id="analyze_output" name="analyze_output" value="Analyze Output" disabled="true"></td>
+            <td><input type="submit" id="doc_count" name="doc_count" value="Count Bucketed Documents" disabled="true"></td>
           </tr>
         </table>
       </form>

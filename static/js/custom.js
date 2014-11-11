@@ -22,17 +22,25 @@
  * @param {string} filename The name that the user has chosen to give this input
  *     file upon uploading it.
  */
-function updateForm(filekey, blobkey, filename) {
+function updateForm(filekey, blobkey, filename, output_link, result_link) {
   $('#jobName').text(filename);
   $('#filekey').val(filekey);
   $('#blobkey').val(blobkey);
   $('#filename').val(filename);
   $('#ds_key').val(filekey);  
-
+  $('#output_link').val(output_link);  
+  
   $('#word_count').removeAttr('disabled');
   $('#index').removeAttr('disabled');
   $('#phrases').removeAttr('disabled');
   $('#run_lsh').removeAttr('disabled');
+  if (output_link.length > 0) {
+	  $('#analyze_output').removeAttr('disabled');
+	  $('#doc_count').removeAttr('disabled');
+  } else {
+	  $('#analyze_output').addAttr('disabled');
+	  $('#doc_count').addAttr('disabled');
+  }
   
 }
 

@@ -1,13 +1,11 @@
 import sys, re, math, random, struct, zipfile, json
-import urllib, webapp2, hashlib
+import webapp2, hashlib
 import logging
 import operator, datetime, time
 import jinja2
 
 from google.appengine.ext import blobstore
-from google.appengine.api import files
 from google.appengine.ext.webapp import blobstore_handlers
-from google.appengine.api import taskqueue
 from google.appengine.ext import ndb
 from google.appengine.api import users
 
@@ -25,21 +23,37 @@ url_file_pattern = re.compile('^."id":"([^"]*)","url":"([^"]*)".*')
 text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 symbols = re.compile('\W+')
 
-def all_blob_zips():
-    for blob_info in blobstore.BlobInfo.all():
-        blob_key = blob_info.key()
-        blob_reader = blobstore.BlobReader(blob_key)
-        yield blob_info, blob_reader
+class Datazz(ndb.Model):
+    """
+    This class is obsolete.  It was created to understand why ndb stopped working one fine day.
+    It should be removed at the next git check in.
+    """
+    filename = ndb.StringProperty()
+    output_link = ndb.StringProperty()
 
-def all_matching_files(zip_reader, filename, pattern):
-    with zip_reader.open(filename) as file_reader:
-        (lno, mno) = (0, 0,)
-        for line in file_reader:
-            found_pattern = pattern.search(line)
-            lno += 1
-            if found_pattern:
-                mno += 1
-                yield lno, mno, found_pattern.group(1), found_pattern.group(2)
+    @classmethod
+    def all(cls):
+        q = cls.query()
+        for ds in q.fetch(10):
+            logging.info('Datazz all %s %s', ds.filename, ds.output_link)
+
+    @classmethod
+    def create(cls, filename, output_link):
+        ndb_datazz = cls.query(Datazz.filename == filename).get()
+        if not ndb_datazz:
+            ndb_datazz = cls(filename = filename, output_link = output_link)
+            ndb_datazz.put()
+            # Technically not required, but there's a little bug in the sandbox environment
+            time.sleep(0.01)
+            logging.info('Datazz new %s %s %s', str(ndb_datazz.key), ndb_datazz.filename, ndb_datazz.output_link)
+        else:
+            logging.info('Datazz old %s %s %s', str(ndb_datazz.key), ndb_datazz.filename, ndb_datazz.output_link)
+            ndb_datazz.output_link = output_link
+            ndb_datazz.put()
+            # Technically not required, but there's a little bug in the sandbox environment
+            time.sleep(0.01)
+        logging.info('Datazz final %s %s %s', str(ndb_datazz.key), ndb_datazz.filename, ndb_datazz.output_link)
+        return ndb_datazz.key
 
 class MainHandler(webapp2.RequestHandler):
     template_env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"),
@@ -48,12 +62,18 @@ class MainHandler(webapp2.RequestHandler):
         user = users.get_current_user()
         username = user.nickname()
 
-        results = Dataset.query()
-        items = [result for result in results]
-        for item in items:
-            item.ds_key = item.key.urlsafe()
+        items = DatasetPB.all()
+#         items = [result for result in results.fetch(10)]
+#         for item in items:
+#             logging.info('fn %s', item.blob_key)
         length = len(items)
         upload_url = blobstore.create_upload_url("/upload_blob")
+        
+#         Datazz.create(u'fn1', 'ol1')
+#         Datazz.all()
+#         Datazz.create('fn1', 'ol2')
+#         Datazz.create('fn2', 'ol3')
+#         Datazz.all()
 
         self.response.out.write(self.template_env.get_template("blobs.html").render(
             {"username": username,
@@ -65,9 +85,20 @@ class MainHandler(webapp2.RequestHandler):
         filename = self.request.get("filename")
         blob_key = self.request.get("blobkey")
         ds_key   = self.request.get("ds_key")
+        output_link   = self.request.get("output_link")
 
-        pipeline = LshPipeline(filename, blob_key, ds_key)
-        pipeline.start()
+        if self.request.get("run_lsh"):
+            pipeline = LshPipeline(filename, blob_key, ds_key)
+            pipeline.start()
+        elif self.request.get("analyze_output"):
+            pipeline = EvalPipeline(output_link[11:])
+            pipeline.start()
+        elif self.request.get("doc_count"):
+            pipeline = CountPipeline(output_link[11:])
+            pipeline.start()
+        else:
+            pass
+
         self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
 
 class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
@@ -76,15 +107,17 @@ class UploadHandler(blobstore_handlers.BlobstoreUploadHandler):
         blob_info = upload_files[0]
         blob_key = blob_info.key()
         logging.info('filename %s key %s', blob_info.filename, blob_key)
-        Dataset.create(blob_info.filename, blob_key)
+        DatasetPB.create(blob_info.filename, blob_key)
+        time.sleep(1)
 
         self.redirect("/blobs")
 
-class Dataset(ndb.Model):
+class DatasetPB(ndb.Model):
     filename = ndb.StringProperty()
     blob_key = ndb.BlobKeyProperty()
-    output_link = ndb.StringProperty()
+    output_link = ndb.StringProperty() 
     result_link = ndb.StringProperty()
+    count_link = ndb.StringProperty()
     random_seeds = ndb.IntegerProperty(repeated = True)
     buckets = ndb.IntegerProperty(repeated = True)
     
@@ -98,11 +131,16 @@ class Dataset(ndb.Model):
     @classmethod
     def create(cls, filename, blob_key, 
                rows=5, bands=40, buckets_per_band=100, 
-               shingle_type='c4', minhash_modulo=5000):
+               shingle_type='c4', minhash_modulo=4999):
         max_hashes = rows * bands
-        dataset = Dataset.query(cls.blob_key == blob_key).get()
+        dataset = DatasetPB.query(cls.blob_key == blob_key).get()
         if not dataset:
-            dataset = Dataset(filename = filename, 
+            logging.info('filename %s', filename)
+            if filename.find('hello.bg') >= 0:
+                # the proper way to do this would be to estimate this number from the average size of documents
+                # but this is good enough for now.
+                minhash_modulo = 997
+            dataset = DatasetPB(filename = filename, 
                               blob_key = blob_key,
                               random_seeds = [random.getrandbits(max_bits) for _ in xrange(max_hashes)],
                               rows = rows,
@@ -111,9 +149,34 @@ class Dataset(ndb.Model):
                               shingle_type = shingle_type,
                               minhash_modulo = minhash_modulo,
                               )
+            dataset.put()
+            # Technically not required, but there's a little bug in the sandbox environment
+            time.sleep(0.01)
+            logging.info('filename stored %s, blob_key %s', dataset.filename, dataset.blob_key)
         else:
             dataset.filename = filename
-        return dataset.put()
+            dataset.put()
+            # Technically not required, but there's a little bug in the sandbox environment
+            time.sleep(0.01)
+        logging.info('in %s, dataset.blob_key %s', blob_key, dataset.blob_key)
+        logging.info('filename in %s', filename)
+        logging.info('filename stored %s', dataset.filename)
+        cls.all()
+        return dataset.key
+    @classmethod
+    def all(cls):
+        items = [result for result in cls.query().fetch()]
+        for item in items:
+            valnames = vars(item)['_values'].keys()
+            logging.info('vals %s', valnames)
+            attributes = {}
+            for name in valnames:
+                try:
+                    attributes[name] = getattr(item, name)
+                except AttributeError:
+                    logging.error('%s: %s', name, '...missing. Check memcache -- it may be serving junk')
+            logging.info('Dataset %s', attributes)
+        return items
 
 class Document(object):
     def __init__(self, _id, text, dataset):
@@ -180,7 +243,7 @@ def lsh_map(data):
     found_pattern = text_file_pattern.search(line)
     if not found_pattern:
         return
-    dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(blob_key)).get()
+    dataset = DatasetPB.query(DatasetPB.blob_key == blobstore.BlobKey(blob_key)).get()
     document = Document(found_pattern.group(1), found_pattern.group(2), dataset)
     
     start = datetime.datetime.utcnow()
@@ -211,8 +274,9 @@ class LshPipeline(base_handler.PipelineBase):
         dataset = ndb.Key(urlsafe=ds_key).get()
         rows = dataset.rows
         hashes = rows * dataset.bands
-        if len(dataset.random_seeds) < hashes:
+        if len(dataset.random_seeds) != hashes:
             dataset.random_seeds = [random.getrandbits(max_bits) for _ in xrange(hashes)]
+            logging.warning('Recalculated %d random seeds', hashes)
             dataset.put()
     
         dataset.buckets = []
@@ -272,14 +336,17 @@ class ViewHandler(webapp2.RequestHandler):
         self.response.out.write('<html><body><p>%s</p></body></html>' % message)
         return
 
-class DistanceHandler(blobstore_handlers.BlobstoreDownloadHandler):
-    def get(self, resource):
-        pipeline = EvalPipeline(resource)
-        pipeline.start()
-        self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
-
 class EvalPipeline(base_handler.PipelineBase):
     def run(self, resource):
+        pairs = 0
+        with blobstore.BlobReader(resource) as blob_reader:
+            for line in blob_reader.readlines():
+                # {'33700': ['/view/Mla4PRwYe1ZpNJN4hluceA==/0/1060348/59518bb889e6/mpmoIZY6S4Si89wdEyX9IA', etc ]}
+                kdocs = json.loads(line.replace("'", '"'))
+                k = kdocs.keys()[0]
+                docs = kdocs[k]
+                pairs += len(docs) * (len(docs) - 1) / 2
+        logging.info('Total number of pairs to compute: %d', pairs)
         output = yield mapreduce_pipeline.MapreducePipeline(
             "results-eval",
             "blobs.eval_map",
@@ -292,12 +359,83 @@ class EvalPipeline(base_handler.PipelineBase):
             reducer_params={
                 "mime_type": "text/plain",
             },
-            shards=2)
+            shards=16)
         yield StoreEvalResults(resource, output)
     def finalized(self):
         pass
 
+def eval_map2(data):
+    (offset, line) = data
+#     logging.info('eval %s',line)
+    kv = json.loads(line.replace("'", '"'))
+    k = kv.keys()[0]
+    vs = kv[k]
+    hv = {}
+    for v in vs:
+        h = v.split('/')[-2]
+        if h not in hv:
+            hv[h] = [v]
+        else:
+            hv[h] += [v]
+    for h1 in hv:
+        for h2 in hv:
+            if h1 <= h2: continue
+            yield {k: [hv[h1], hv[h2]]}, ""
+
+def eval_reduce2(khv, values):
+    def retrieve_doc(v):
+        (zip_key, file_no, offset, h, id1) = tuple(v[6:].split('/'))
+        dataset = DatasetPB.query(DatasetPB.blob_key == blobstore.BlobKey(zip_key)).get()
+        blob_reader = blobstore.BlobReader(zip_key)
+        zip_reader = zipfile.ZipFile(blob_reader)
+        infolist = zip_reader.infolist()
+        zipinfo = infolist[int(file_no)]
+        with zip_reader.open(zipinfo) as f:
+            f.read(int(offset))
+            text = f.readline()
+            found_pattern = text_file_pattern.search(text)
+            doc = Document(found_pattern.group(1), found_pattern.group(2), dataset)
+        shingles = set(doc.shingles())
+        minhashes = doc.calc_minhashes()
+        return shingles, minhashes, len(doc.text)
+    khv = khv.replace("{u'", "{'").replace("[u'", "['").replace(" u'", " '").replace("'", '"')
+    try:
+        khv2 = json.loads(khv)
+    except:
+        logging.warning('json.loads failure for %s', khv)
+        return
+    k = khv2.keys()[0]
+    hv = khv2[k]
+    v1 = hv[0][0]
+    v2 = hv[1][0]
+    (shingles1, minhashes1, len1) = retrieve_doc(v1)
+    (shingles2, minhashes2, len2) = retrieve_doc(v2)
+    jac_txt = float(len(shingles1 & shingles2)) / float(len(shingles1 | shingles2)) 
+    jac_min = reduce(lambda x, y: x+y, map(lambda a,b: a == b, minhashes1,minhashes2)) / float(len(minhashes1))
+    emitting = {'set1': [str(addr.split('/')[-1]) for addr in hv[0]], 
+                'set2': [str(addr.split('/')[-1]) for addr in hv[1]], 
+                'mh': jac_min, 
+                'sh': jac_txt,
+                'len1': len1,
+                'len2': len2}
+    yield k, (emitting['set1'], emitting['set2'], emitting['mh'], emitting['sh'], emitting['len1'], emitting['len2'])
+
 def eval_map(data):
+    def retrieve_doc(v):
+        (zip_key, file_no, offset, h, id1) = tuple(v[6:].split('/'))
+        dataset = DatasetPB.query(DatasetPB.blob_key == blobstore.BlobKey(zip_key)).get()
+        blob_reader = blobstore.BlobReader(zip_key)
+        zip_reader = zipfile.ZipFile(blob_reader)
+        infolist = zip_reader.infolist()
+        zipinfo = infolist[int(file_no)]
+        with zip_reader.open(zipinfo) as f:
+            f.read(int(offset))
+            text = f.readline()
+            found_pattern = text_file_pattern.search(text)
+            doc = Document(found_pattern.group(1), found_pattern.group(2), dataset)
+        shingles = set(doc.shingles())
+        minhashes = doc.calc_minhashes()
+        return shingles, minhashes, len(doc.text)
     (offset, line) = data
     start = time.time()
 #     logging.info('eval %s',line)
@@ -318,48 +456,24 @@ def eval_map(data):
     number_of_pairs_processed = 0
     for h1 in hv:
         v1 = hv[h1][0]
-        (zip_key, file_no, offset, h, id1) = tuple(v1[6:].split('/'))
-        dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(zip_key)).get()
-        blob_reader = blobstore.BlobReader(zip_key)
-        zip_reader = zipfile.ZipFile(blob_reader)
-        infolist = zip_reader.infolist()
-        zipinfo = infolist[int(file_no)]
-        with zip_reader.open(zipinfo) as f:
-            f.read(int(offset))
-            text = f.readline()
-            found_pattern = text_file_pattern.search(text)
-            doc1 = Document(found_pattern.group(1), found_pattern.group(2), dataset)
-        shingles1 = set(doc1.shingles())
-        minhashes1 = doc1.calc_minhashes()
+        (shingles1, minhashes1, len1) = retrieve_doc(v1)
         for h2 in hv:
             if h1 <= h2: continue
             # find the distances between documents in each pair of hashes
             v2 = hv[h2][0]
-            (zip_key, file_no, offset, h, id2) = tuple(v2[6:].split('/'))
-            dataset = Dataset.query(Dataset.blob_key == blobstore.BlobKey(zip_key)).get()
-            blob_reader = blobstore.BlobReader(zip_key)
-            zip_reader = zipfile.ZipFile(blob_reader)
-            infolist = zip_reader.infolist()
-            zipinfo = infolist[int(file_no)]
-            with zip_reader.open(zipinfo) as f:
-                f.read(int(offset))
-                text = f.readline()
-                found_pattern = text_file_pattern.search(text)
-                doc2 = Document(found_pattern.group(1), found_pattern.group(2), dataset)
-            shingles2 = set(doc2.shingles())
-            minhashes2 = doc2.calc_minhashes()
+            (shingles2, minhashes2, len2) = retrieve_doc(v2)
             jac_txt = float(len(shingles1 & shingles2)) / float(len(shingles1 | shingles2)) 
             jac_min = reduce(lambda x, y: x+y, map(lambda a,b: a == b, minhashes1,minhashes2)) / float(len(minhashes1))
-            emitting = {'set1': [str(addr.split('/')[-1]) for addr in hv[h1]], 
-                        'set2': [str(addr.split('/')[-1]) for addr in hv[h2]], 
+            emitting = {'set1': [str(addr) for addr in hv[h1]], 
+                        'set2': [str(addr) for addr in hv[h2]], 
                         'mh': jac_min, 
                         'sh': jac_txt,
-                        'len1': len(doc1.text),
-                        'len2': len(doc2.text)}
+                        'len1': len1,
+                        'len2': len2}
 #             row = '{set1} {set2} mh: {mh:.3f} sh: {sh:.3f} {len1:} {len2:}'.format(**emitting)
             yield k, (emitting['set1'], emitting['set2'], emitting['mh'], emitting['sh'], emitting['len1'], emitting['len2'])
 #             yield k, row
-            
+             
             # we will only allocate 5 minutes for this map function. Save what we have by then and move on.
             number_of_pairs_processed += 1
             end = time.time()
@@ -368,7 +482,7 @@ def eval_map(data):
                 total_pairs = total_docs * (total_docs - 1) / 2
                 logging.warn('Abandoning map after %d seconds (%d of %d pairs processed)', (end - start), number_of_pairs_processed, total_pairs)
                 return
-
+ 
 def eval_reduce(key, values):
     yield (key, values)
 
@@ -381,7 +495,7 @@ class StoreEvalResults(base_handler.PipelineBase):
     """
     def run(self, resource, output):
         logging.info("resource is %s, output is %s", resource, str(output))
-        dataset = Dataset.query(Dataset.output_link == '/blobstore/'+resource).get()
+        dataset = DatasetPB.query(DatasetPB.output_link == '/blobstore/'+resource).get()
         dataset.result_link = output[0]
         dataset.put()
         return
@@ -389,8 +503,54 @@ class StoreEvalResults(base_handler.PipelineBase):
     def finalized(self):
         logging.info('StoreEvalResults finalized')
 
+class CountPipeline(base_handler.PipelineBase):
+    def run(self, resource):
+        output = yield mapreduce_pipeline.MapreducePipeline(
+            "results-count",
+            "blobs.count_map",
+            "blobs.count_reduce",
+            'mapreduce.input_readers.BlobstoreLineInputReader', 
+            "mapreduce.output_writers.BlobstoreOutputWriter",
+            mapper_params={
+                "blob_keys": resource,
+            },
+            reducer_params={
+                "mime_type": "text/plain",
+            },
+            shards=6)
+        yield StoreCountResults(resource, output)
+    def finalized(self):
+        pass
+
+def count_map(data):
+    (offset, line) = data
+    kv = json.loads(line.replace("'", '"'))
+    k = kv.keys()[0]
+    vs = kv[k]
+    for v in vs:
+        yield (v, "")
+
+def count_reduce(key, values):
+    yield "%s: %d\n" % (key, len(values))
+
+class StoreCountResults(base_handler.PipelineBase):
+    """A pipeline to store the result of the Analysis job in the database.
+
+    Args:
+      encoded_key: the DB key corresponding to the metadata of this job
+      output: the blobstore location where the output of the job is stored
+    """
+    def run(self, resource, output):
+        logging.info("resource is %s, output is %s", resource, str(output))
+        dataset = DatasetPB.query(DatasetPB.output_link == '/blobstore/'+resource).get()
+        dataset.count_link = output[0]
+        dataset.put()
+        return
+
+    def finalized(self):
+        logging.info('StoreCountResults finalized')
+
 urls = [('/blobs', MainHandler),
         ('/upload_blob', UploadHandler),
         ('/view/([^/]+)?/([^/]+)?/([^/]+)?/([^/]+)?/([^/]+)?', ViewHandler),
-        ('/calc_dists/blobstore/([^/]+)?', DistanceHandler),
         ]
