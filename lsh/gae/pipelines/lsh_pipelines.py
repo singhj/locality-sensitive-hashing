@@ -1,8 +1,9 @@
-from pipelines.gae.store_output import StoreOutput
-from mapreduce import base_handler
-from google.appengine.ext import ndb
 import logging
+from google.appengine.ext import ndb
+from lsh.gae.store_output import StoreOutput
+from mapreduce import base_handler
 from mapreduce import mapreduce_pipeline
+
 
 class LshBlobPipeline(base_handler.PipelineBase):
     """A pipeline to run LSH that reads and writes to blobstore
@@ -12,6 +13,7 @@ class LshBlobPipeline(base_handler.PipelineBase):
     """
 
     def run(self, filename, blobkey, ds_key, map_reduce_pipeline):
+        logging.info("OpenLSH > LshBlobPipeline.run() called.")
         self.params = "filename %s \tblobkey %s\tds_key %s" % (filename, blobkey, ds_key)
 
         logging.warning(self.params)
@@ -33,3 +35,4 @@ class LshBlobPipeline(base_handler.PipelineBase):
 
     def finalized(self):
         pass
+

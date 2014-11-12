@@ -1,34 +1,30 @@
-import webapp2, re, zipfile
+import zipfile
+import logging
+
+import webapp2
+import re
 import jinja2
 from google.appengine.api import users
+
 from bs4 import BeautifulSoup
-import logging
+from utils.zip_utils import all_matching_files
 from repositories.gae.blobstore import get_all_blob_info
 from repositories.gae.blob_dataset import BlobDataset
 from repositories.gae.blobstore import create_upload_url, get_blob_key
-from pipelines.gae.lsh_pipelines import LshBlobPipeline
-from pipelines.gae.map_reduce_pipeline_factory import MapReducePipelineFactory
-from lsh_map_reduce.lsh_map_base import LshMapBase
-from lsh_map_reduce.lsh_reduce_base import LshReduceBase
-from utils.zip_utils import all_matching_files
+from lsh.gae.pipelines.map_reduce_pipeline_factory import MapReducePipelineFactory
+from lsh.gae.pipelines.lsh_pipelines import LshBlobPipeline
+from lsh.gae.map_reduce import map, reduce
 
 symbols = re.compile('\W+')
 text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 
-def parse_text(text):
-    soup = BeautifulSoup(text.replace('\\n',' '))
-    [s.extract() for s in soup(['script', 'style'])]
-    text = soup.get_text(separator=' ', strip=True)
-    text = symbols.sub(' ', text.lower())
-
-    # Remove spurious white space characters
-    text = ' '.join(text.split())
-    return text
+import os
 
 class MainHandler(webapp2.RequestHandler):
     template_env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"),
                                       autoescape=True)
     def get(self):
+        logging.info(os.path.abspath(os.path.curdir))
         logging.info('Peer Belt Driver get method called!')
         user = users.get_current_user()
         username = user.nickname()
@@ -64,10 +60,9 @@ class MainHandler(webapp2.RequestHandler):
         self.redirect(pipeline.base_path + "/status?root=" + pipeline.pipeline_id)
 
     def get_pipeline(self, blob_key):
-
-        return MapReducePipelineFactory("locality_sensitive_hashing",
-            "peer_belt_driver.map",
-            "peer_belt_driver.reduce",
+        return MapReducePipelineFactory('locality_sensitive_hashing',
+            'peer_belt_driver.lsh_map',
+            'peer_belt_driver.lsh_reduce',
             'mapreduce.input_readers.BlobstoreZipLineInputReader',
             "mapreduce.output_writers.BlobstoreOutputWriter",
             mapper_params={
@@ -76,46 +71,45 @@ class MainHandler(webapp2.RequestHandler):
             reducer_params={
                 "mime_type": "text/plain",
             },
-            shards=16).create2()
+            shards=16).create()
 
-class PeerLshMap(LshMapBase):
+#wrapper functions that call the PeerBelt specific map and reduce functions
+def lsh_map(data):
+    # pre-process data
+    dataset, id, text = pre_process(data)
 
-    @classmethod
-    def pre_process(cls, data):
-        (blob_key, file_no, line) = (data[0][0], data[0][1], data[1])
-        found_pattern = text_file_pattern.search(line)
-        if not found_pattern:
-            return
-        (_id, text) = (found_pattern.group(1), found_pattern.group(2))
+    #parse text
+    parsed_text = parse_text(text)
 
-        dataset = BlobDataset.query(BlobDataset.blob_key == get_blob_key(blob_key)).get()
-        text = parse_text(text)
+    for bkt,output_str in map(dataset, parsed_text, id):
+        yield bkt,output_str
 
-        return (dataset, _id, text)
+def lsh_reduce(key, values):
+    for k,v in reduce(key,values):
+        yield k,v
 
-    @classmethod
-    def parsed_text(cls, text):
-        soup = BeautifulSoup(text.replace('\\n',' '))
-        [s.extract() for s in soup(['script', 'style'])]
-        text = soup.get_text(separator=' ', strip=True)
-        text = symbols.sub(' ', text.lower())
+def pre_process(data):
+    logging.info("Peer Belt > pre_process() called.")
+    (blob_key, file_no, line) = (data[0][0], data[0][1], data[1])
+    found_pattern = text_file_pattern.search(line)
+    if not found_pattern:
+        return
+    (_id, text) = (found_pattern.group(1), found_pattern.group(2))
 
-        # Remove spurious white space characters
-        text = ' '.join(text.split())
-        return text
+    dataset = BlobDataset.query(BlobDataset.blob_key == get_blob_key(blob_key)).get()
 
-class PeerLshReduce(LshReduceBase):
+    return (dataset, _id, text)
 
-    @classmethod
-    def reduce(cls, key, values):
-        yield (key, values)
+def parse_text(text):
+    logging.info("Peer Belt > parse_text() called.")
+    soup = BeautifulSoup(text.replace('\\n',' '))
+    [s.extract() for s in soup(['script', 'style'])]
+    text = soup.get_text(separator=' ', strip=True)
+    text = symbols.sub(' ', text.lower())
 
-#our wrapper functions that call the PeerBelt specific map and reduce functions
-def map(data):
-    PeerLshMap.map(data)
-
-def reduce(key, values):
-    PeerLshReduce.reduce(key, values)
+    # Remove spurious white space characters
+    text = ' '.join(text.split())
+    return text
 
 class ViewHandler(webapp2.RequestHandler):
     def get(self, dataset_name, file_id):

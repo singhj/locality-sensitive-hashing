@@ -1,5 +1,6 @@
 from mapreduce import base_handler
 from google.appengine.ext import ndb
+from repositories.gae.blob_dataset import BlobDataset
 import logging
 
 class StoreOutput(base_handler.PipelineBase):
