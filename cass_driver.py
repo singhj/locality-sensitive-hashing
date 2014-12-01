@@ -1,12 +1,13 @@
 import sys, os, re, time, math, random, struct, zipfile, operator
 sys.path.insert(0, 'libs')
-sys.path.insert(0, 'lsh')
+# sys.path.insert(0, 'lsh')
+print sys.path
 from lsh.shingles.shingles import _get_list_of_shingles
 from lsh.utils.similarity import compute_positive_hash
 from bs4 import BeautifulSoup
 
 from cassandra.cluster import Cluster
-from cassandra.query import SimpleStatement
+from cassandra.query import SimpleStatement, dict_factory
 from cassandra import ConsistencyLevel, InvalidRequest
 
 max_bits = int(math.log(sys.maxsize+2, 2))
@@ -66,6 +67,10 @@ class DatasetPB(object):
         qry = "SELECT * FROM {name} WHERE ds_key=?".format(name = self.__class__.__name__)
         self.select = session.prepare(qry)
         self.select.consistency_level = ConsistencyLevel.QUORUM
+        doc = Document(name = Document.__class__.__name__, attrs = Document.attrs)
+        self.doc_query = "SELECT * FROM Document WHERE ds_key=? AND doc_id=?"
+        self.doc_select = session.prepare(self.doc_query)
+        self.doc_select.consistency_level = ConsistencyLevel.QUORUM
 
     def get(self, ds_key):
         if ds_key:
@@ -81,13 +86,16 @@ class DatasetPB(object):
     def find(cls, ds_key):
         ds = DatasetPB(name = cls.__name__, attrs = cls.attrs)
         dataset = ds.get(ds_key)
-#         print dataset.ds_key, dataset.filename
-        return dataset
+        for k in dataset.keys():
+            setattr(ds, k, dataset[k])
+        return ds
 
     @classmethod
     def create(cls, filename,  
                rows=5, bands=350, buckets_per_band=100, 
                shingle_type='c4', minhash_modulo=701):
+
+        # Make sure the underlying tables exist
         ds = DatasetPB(name = cls.__name__, attrs = cls.attrs)
 
         max_iters = 4
@@ -98,11 +106,14 @@ class DatasetPB(object):
                 this_ds = ds.get(ds_key)
                 if not this_ds:
                     break
-                if this_ds.filename == filename:
+                if this_ds['filename'] == filename:
                     print "A dataset with filename {filename} already exists, reusing".format(filename = filename)
-                    return this_ds
+                    for k in this_ds.keys():
+                        setattr(ds, k, this_ds[k])
+                    return ds
             except ValueError:
                 raise Exception('WTF?')
+        ds.ds_key = ds_key
         if iter_count == max_iters - 1:
             raise Exception("Unable to create Dataset ID")
         max_hashes = rows * bands
@@ -124,25 +135,24 @@ class DatasetPB(object):
         session.execute(query)
         return cls.find(ds_key)
 
-class Document(object):
-    __metaclass__ = CassandraTable
-    attrs = [
-             'ds_key text',
-             'doc_id text',
-             'html text',
-             'buckets list<int>',
-             'minhashes list<int>',
-             'bucket_count int',
-             'PRIMARY KEY (ds_key, doc_id)',
-             ]
-    @classmethod
-    def create(cls, ds_key, _id, text):
-        dataset = DatasetPB.find(ds_key)
-        (found, doc) = Document.get_else_create(ds_key, _id)
+    def get_else_create_doc(self, doc_id):
+        try:
+            docs = session.execute(self.doc_select, [self.ds_key, doc_id])
+            if len(docs) == 1:
+                return True, docs[0]
+        except: 
+            pass
+        doc = Document(name = 'Document', attrs = Document.attrs)
+        doc.ds_key = self.ds_key
+        doc.doc_id = doc_id
+        return False, doc
+
+    def create_doc(self, _id, text):
+        (found, doc) = self.get_else_create_doc(_id)
         if found:
             if 0 == int(1000*time.time()) % 20:
                 # print 5% of the documents on average
-                print doc.ds_key, doc.doc_id, doc.bucket_count, doc.buckets
+                print doc['ds_key'], doc['doc_id'], doc['bucket_count'], doc['buckets']
             return doc
 
         ### Parse
@@ -152,15 +162,15 @@ class Document(object):
         text = symbols.sub(' ', text.lower())
         text = ' '.join(text.split())
         doc.text = text
-        doc.dataset = dataset
-        doc.rows = dataset.rows
-        doc.hashes = doc.rows * dataset.bands
-        doc.seeds = list(dataset.random_seeds)
-        doc.modulo = dataset.minhash_modulo
-        doc.buckets_per_band = dataset.buckets_per_band
-        doc.sh_type = dataset.shingle_type
+        doc.dataset = self
+        doc.rows = self.rows
+        doc.hashes = doc.rows * self.bands
+        doc.seeds = list(self.random_seeds)
+        doc.modulo = self.minhash_modulo
+        doc.buckets_per_band = self.buckets_per_band
+        doc.sh_type = self.shingle_type
 
-        max_hashes = dataset.rows * dataset.bands
+        max_hashes = self.rows * self.bands
         doc.minhashes = doc.calc_minhashes()
 
         doc.buckets = doc.bucketize()
@@ -179,36 +189,26 @@ class Document(object):
         data_keys = data.keys()
         data_vals = ', '.join([str(data[k]) for k in data_keys])
         data_keys = ', '.join(data_keys)
-        qstring = 'INSERT INTO %s (%s) VALUES (%s)' % (cls.__name__, data_keys, data_vals)
+        qstring = 'INSERT INTO %s (%s) VALUES (%s)' % ('Document', data_keys, data_vals)
         document = session.execute(qstring)
         return document
 
-    def __init__(self):
-        q = "SELECT * FROM {name} WHERE ds_key=? AND doc_id=?"
-        qry = q.format(name = self.__class__.__name__)
-        self.select = session.prepare(qry)
-        self.select.consistency_level = ConsistencyLevel.QUORUM
+class Document(object):
+    __metaclass__ = CassandraTable
+    attrs = [
+             'ds_key text',
+             'doc_id text',
+             'html text',
+             'buckets list<int>',
+             'minhashes list<int>',
+             'bucket_count int',
+             'PRIMARY KEY (ds_key, doc_id)',
+             ]
 
-    def get(self, ds_key, doc_id):
-        if ds_key:
-            ds = session.execute(self.select, [ds_key, doc_id])
-            try:
-                if len(ds) == 1:
-                    return ds[0]
-            except:
-                pass
-            return ds
-    
     @classmethod
-    def get_else_create(cls, ds_key, doc_id):
+    def create(cls):
+        # Make sure the underlying tables exist
         doc = Document(name = cls.__name__, attrs = cls.attrs)
-        document = doc.get(ds_key, doc_id)
-        if document:
-            return True, document
-        else:
-            doc.ds_key = ds_key
-            doc.doc_id = doc_id
-            return False, doc
 
     def calc_minhashes(self):
         def minhashes_for_shingles(shingles):
@@ -264,8 +264,11 @@ def main():
         exit(1)
 
     infolist = zip_reader.infolist()
-    dataset = DatasetPB.create(filename)
+    dummydoc = Document.create()            # force the creation of the table
+    dataset = DatasetPB.create(filename)    # force the creation of the table and filling it with a row
     print dataset.ds_key, dataset.filename
+#     print dataset['ds_key'], dataset['filename']
+    dataset = DatasetPB.find(dataset.ds_key)
     start = time.time()
     for info in infolist:
         with zip_reader.open(info) as file_reader:
@@ -277,12 +280,14 @@ def main():
                 udata=html.decode("utf-8")
                 html=udata.encode("ascii","ignore")
                 html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
-                Document.create(dataset.ds_key, doc_id, html)
+                dataset.create_doc(doc_id, html)
             end = time.time()
             print 'File', info.filename, int(0.5+end-start), 'seconds'
             start = end 
 
+cluster = Cluster()
+session = cluster.connect('jkeyspace')
+session.row_factory = dict_factory
+
 if __name__ == "__main__":
-    cluster = Cluster()
-    session = cluster.connect('jkeyspace')
     main()
