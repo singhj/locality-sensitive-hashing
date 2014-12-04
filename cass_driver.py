@@ -1,7 +1,12 @@
 import sys, os, re, time, math, random, struct, zipfile, operator
 sys.path.insert(0, 'libs')
-# sys.path.insert(0, 'lsh')
-print sys.path
+
+import logging
+
+LOG_FILENAME = '/home/ubuntu/CassDriver.log'
+logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG)
+
+
 from lsh.shingles.shingles import _get_list_of_shingles
 from lsh.utils.similarity import compute_positive_hash
 from bs4 import BeautifulSoup
@@ -10,6 +15,7 @@ from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement, dict_factory
 from cassandra import ConsistencyLevel, InvalidRequest
 
+logging.info('CassDriver path %s', sys.path)
 max_bits = int(math.log(sys.maxsize+2, 2))
 text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 symbols = re.compile('\W+')
@@ -29,7 +35,7 @@ class CassandraTable(type):
         if cls not in cls._instances:
             try:
                 rows = session.execute('SELECT COUNT(*) FROM {name}'.format(name = kwds['name']))
-                print 'Table', kwds['name'], 'exists'
+                logging.debug('Table %s exists', kwds['name'])
             except InvalidRequest as err:
                 remsg = re.compile(r'code=(\d*).*')
                 found = remsg.search(err.message)
@@ -42,7 +48,7 @@ class CassandraTable(type):
                         raise UnableToCreateTable(kwds['name'])
                 else:
                     raise UnknownException()
-                print 'Table', kwds['name'], 'was created'
+                logging.debug('Table %s was created', kwds['name'])
             cls._instances[cls] = super(CassandraTable, cls).__call__(*args, **{})
         return cls._instances[cls]
 
@@ -70,7 +76,12 @@ class DatasetPB(object):
         doc = Document(name = Document.__class__.__name__, attrs = Document.attrs)
         self.doc_query = "SELECT * FROM Document WHERE ds_key=? AND doc_id=?"
         self.doc_select = session.prepare(self.doc_query)
-        self.doc_select.consistency_level = ConsistencyLevel.QUORUM
+        self.bkt_query = "SELECT buckets FROM Document WHERE ds_key=? AND doc_id=?"
+        self.bkt_select = session.prepare(self.bkt_query)
+        self.nns_query = "SELECT doc_id, minhashes FROM Document WHERE ds_key=? AND buckets CONTAINS ?"
+        self.nns_select = session.prepare(self.nns_query)
+        self.doc_ids_query = "SELECT doc_id FROM Document WHERE ds_key=?"
+        self.doc_ids_select = session.prepare(self.doc_ids_query)
 
     def get(self, ds_key):
         if ds_key:
@@ -107,7 +118,7 @@ class DatasetPB(object):
                 if not this_ds:
                     break
                 if this_ds['filename'] == filename:
-                    print "A dataset with filename {filename} already exists, reusing".format(filename = filename)
+                    logging.debug("A dataset with %s already exists, reusing", filename)
                     for k in this_ds.keys():
                         setattr(ds, k, this_ds[k])
                     return ds
@@ -147,12 +158,50 @@ class DatasetPB(object):
         doc.doc_id = doc_id
         return False, doc
 
+    def get_doc(self, doc_id):
+        try:
+            docs = session.execute(self.doc_select, [self.ds_key, doc_id])
+            if len(docs) == 1:
+                doc = Document(name = 'Document', attrs = Document.attrs)
+                doc.ds_key = self.ds_key
+                doc.doc_id = doc_id
+                ret_dict = docs[0]
+                for k in ret_dict.keys():
+                    setattr(doc, k, ret_dict[k])
+                return doc
+        except:
+            pass
+        return None
+
+    def get_nns(self, doc_id):
+        doc = self.get_doc(doc_id)
+        if not doc:
+            return []
+        bkts = doc.buckets
+        mhs = {}
+        for bkt in bkts:
+            bkt_docs = session.execute(self.nns_select, [self.ds_key, bkt])
+            for bkt_doc in bkt_docs:
+                mhs[bkt_doc['doc_id']] = bkt_doc['minhashes']
+        del mhs[doc_id]
+        jac = {}
+        for doc_id2 in mhs.keys():
+            jac_min = reduce(lambda x, y: x+y, map(lambda a,b: a == b, doc.minhashes,mhs[doc_id2])) / float(len(doc.minhashes))
+            jac[doc_id2] = 1.0 - jac_min
+            logging.info('Jaccard distance %s | %s: %6.2f', doc_id, doc_id2, jac[doc_id2])
+        return jac
+
+    def sample_doc_ids(self, ratio):
+        doc_ids = session.execute(self.doc_ids_select, [self.ds_key])
+        doc_ids = random.sample(doc_ids, int(0.5+ratio*len(doc_ids)))
+        return [_['doc_id'] for _ in doc_ids]
+
     def create_doc(self, _id, text):
         (found, doc) = self.get_else_create_doc(_id)
         if found:
             if 0 == int(1000*time.time()) % 20:
                 # print 5% of the documents on average
-                print doc['ds_key'], doc['doc_id'], doc['bucket_count'], doc['buckets']
+                logging.info('%s %s %s %s',doc['ds_key'], doc['doc_id'], doc['bucket_count'], doc['buckets'])
             return doc
 
         ### Parse
@@ -177,7 +226,7 @@ class DatasetPB(object):
         doc.bucket_count = len(doc.buckets)
         if 0 == int(1000*time.time()) % 20:
             # print 5% of the documents on average
-            print doc.ds_key, doc.doc_id, doc.bucket_count, doc.buckets
+            logging.info('%s %s %s %s', doc.ds_key, doc.doc_id, doc.bucket_count, doc.buckets)
         data = {
                 'ds_key': "'%s'" % doc.ds_key,
                 'doc_id': "'%s'" % doc.doc_id,
@@ -266,13 +315,12 @@ def main():
     infolist = zip_reader.infolist()
     dummydoc = Document.create()            # force the creation of the table
     dataset = DatasetPB.create(filename)    # force the creation of the table and filling it with a row
-    print dataset.ds_key, dataset.filename
-#     print dataset['ds_key'], dataset['filename']
+    logging.debug('%s %s', dataset.ds_key, dataset.filename)
     dataset = DatasetPB.find(dataset.ds_key)
     start = time.time()
     for info in infolist:
         with zip_reader.open(info) as file_reader:
-            print 'Reading file', info.filename
+            logging.debug('Reading file %s', info.filename)
             for line in file_reader.readlines():
                 found_pattern = text_file_pattern.search(line)
                 doc_id = found_pattern.group(1)
@@ -282,7 +330,7 @@ def main():
                 html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
                 dataset.create_doc(doc_id, html)
             end = time.time()
-            print 'File', info.filename, int(0.5+end-start), 'seconds'
+            logging.info('File %s %d seconds', info.filename, int(0.5+end-start))
             start = end 
 
 cluster = Cluster()
