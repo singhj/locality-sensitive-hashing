@@ -56,6 +56,7 @@ class DatasetPB(object):
     __metaclass__ = CassandraTable
     attrs = [
              'ds_key text primary key',
+             'source text',
              'filename text',
              'lsh_output text',
              'eval_output text',
@@ -80,7 +81,7 @@ class DatasetPB(object):
         self.bkt_select = session.prepare(self.bkt_query)
         self.nns_query = "SELECT doc_id, minhashes FROM Document WHERE ds_key=? AND buckets CONTAINS ?"
         self.nns_select = session.prepare(self.nns_query)
-        self.doc_ids_query = "SELECT doc_id FROM Document WHERE ds_key=?"
+        self.doc_ids_query = "SELECT doc_id FROM Document WHERE ds_key=? ALLOW FILTERING"
         self.doc_ids_select = session.prepare(self.doc_ids_query)
 
     def get(self, ds_key):
@@ -102,7 +103,7 @@ class DatasetPB(object):
         return ds
 
     @classmethod
-    def create(cls, filename,  
+    def create(cls, source, filename,  
                rows=5, bands=350, buckets_per_band=100, 
                shingle_type='c4', minhash_modulo=701):
 
@@ -111,7 +112,7 @@ class DatasetPB(object):
 
         max_iters = 4
         for iter_count in xrange(max_iters):
-            ds_key = '%04d' % (abs(hash(filename + ' ' * iter_count)) % (10 ** 4))
+            ds_key = '%04d' % (abs(hash(source + filename + ' ' * iter_count)) % (10 ** 4))
             try:
                 # Does a dataset with this ID already exist?
                 this_ds = ds.get(ds_key)
@@ -130,6 +131,7 @@ class DatasetPB(object):
         max_hashes = rows * bands
         data = {
                 'ds_key': "'%s'" % ds_key,
+                'source': "'%s'" % source,
                 'filename': "'%s'" % filename,
                 'random_seeds': str([random.getrandbits(max_bits) for _ in xrange(max_hashes)]).replace('L',''),
                 'rows': rows,
@@ -188,7 +190,8 @@ class DatasetPB(object):
         for doc_id2 in mhs.keys():
             jac_min = reduce(lambda x, y: x+y, map(lambda a,b: a == b, doc.minhashes,mhs[doc_id2])) / float(len(doc.minhashes))
             jac[doc_id2] = 1.0 - jac_min
-            logging.info('Jaccard distance %s | %s: %6.2f', doc_id, doc_id2, jac[doc_id2])
+            if 0 == int(1000*time.time()) % 100:
+                logging.info('Sampling (1%%) Jaccard distance %s | %s: %6.2f', doc_id, doc_id2, jac[doc_id2])
         return jac
 
     def sample_doc_ids(self, ratio):
@@ -251,13 +254,15 @@ class Document(object):
              'buckets list<int>',
              'minhashes list<int>',
              'bucket_count int',
-             'PRIMARY KEY (ds_key, doc_id)',
+             'PRIMARY KEY (doc_id, ds_key)',
              ]
 
     @classmethod
     def create(cls):
         # Make sure the underlying tables exist
         doc = Document(name = cls.__name__, attrs = cls.attrs)
+        query = 'create index if not exists doc_buckets on %s.Document (buckets)' % keyspace
+        session.execute(query)
 
     def calc_minhashes(self):
         def minhashes_for_shingles(shingles):
@@ -314,7 +319,7 @@ def main():
 
     infolist = zip_reader.infolist()
     dummydoc = Document.create()            # force the creation of the table
-    dataset = DatasetPB.create(filename)    # force the creation of the table and filling it with a row
+    dataset = DatasetPB.create('bash', filename)    # force the creation of the table and filling it with a row
     logging.debug('%s %s', dataset.ds_key, dataset.filename)
     dataset = DatasetPB.find(dataset.ds_key)
     start = time.time()
@@ -334,7 +339,8 @@ def main():
             start = end 
 
 cluster = Cluster()
-session = cluster.connect('jkeyspace')
+keyspace = 'jkeyspace'
+session = cluster.connect(keyspace)
 session.row_factory = dict_factory
 
 if __name__ == "__main__":
