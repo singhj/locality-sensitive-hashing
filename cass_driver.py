@@ -1,9 +1,9 @@
 import sys, os, re, time, math, random, struct, zipfile, operator
+path = os.path.dirname([p for p in sys.path if p][0])
 sys.path.insert(0, 'libs')
-
 import logging
 
-LOG_FILENAME = '/home/ubuntu/CassDriver.log'
+LOG_FILENAME = path+'/CassDriver.log'
 logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG)
 
 
@@ -15,7 +15,6 @@ from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement, dict_factory
 from cassandra import ConsistencyLevel, InvalidRequest
 
-logging.info('CassDriver path %s', sys.path)
 max_bits = int(math.log(sys.maxsize+2, 2))
 text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
 symbols = re.compile('\W+')
@@ -339,7 +338,7 @@ def main():
             start = end 
 
 cluster = Cluster()
-keyspace = 'jkeyspace'
+keyspace = 'datathinks'
 session = cluster.connect(keyspace)
 session.row_factory = dict_factory
 
