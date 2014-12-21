@@ -56,3 +56,6 @@ class Cache():
         clear all cache
         """
         self._store = OrderedDict()
+
+    def keys(self):
+        return self._store.keys()

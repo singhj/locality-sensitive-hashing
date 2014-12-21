@@ -1,10 +1,10 @@
-import sys, os, re, time, math, random, struct, zipfile, operator
+import sys, os, re, time, math, random, struct, zipfile, operator, csv, hashlib, uuid, pdb
 from collections import defaultdict
-path = os.path.dirname([p for p in sys.path if p][0])
+dir_path = os.path.dirname([p for p in sys.path if p][0])
 sys.path.insert(0, 'libs')
 import logging
 
-LOG_FILENAME = path+'/CassDriver.log'
+LOG_FILENAME = dir_path+'/CassDriver.log'
 logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG)
 
 from lsh.shingles.shingles import _get_list_of_shingles
@@ -15,8 +15,10 @@ from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement, dict_factory
 from cassandra import ConsistencyLevel, InvalidRequest
 
-from procache import Cache
-shingle_cache = Cache(max_size = 2)
+from utils.procache import Cache
+from utils.levenshtein import levenshtein
+
+shingle_cache = Cache(max_size = 1)
 
 max_bits = 32
 max_mask = 2**max_bits - 1
@@ -27,6 +29,15 @@ class UnableToCreateTable(Exception):
     pass
 class UnknownException(Exception):
     pass
+
+class CassandraInt(object):
+    @staticmethod
+    def to_db(number):
+        signed = struct.unpack('=l', struct.pack('=L', number & max_mask))[0]
+        return signed
+    @staticmethod
+    def fm_db(number):
+        return max_mask & number
 
 class CassandraTable(type):
     """
@@ -68,7 +79,6 @@ class DatasetPB(object):
              'buckets list<int>',
              'rows int',
              'bands int',
-             'buckets_per_band int',
              'shingle_type ascii',
              'minhash_modulo int',
              ]
@@ -114,8 +124,7 @@ class DatasetPB(object):
 
     @classmethod
     def create(cls, source, filename,  
-               rows=10, bands=175, buckets_per_band=100, 
-               shingle_type='c4', minhash_modulo=263):
+               rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
 
         # Make sure the underlying tables exist
         ds = DatasetPB(name = cls.__name__, attrs = cls.attrs)
@@ -146,7 +155,6 @@ class DatasetPB(object):
                 'random_seeds': str([(max_mask & random.getrandbits(max_bits)) for _ in xrange(max_hashes)]).replace('L',''),
                 'rows': rows,
                 'bands': bands,
-                'buckets_per_band': buckets_per_band,
                 'shingle_type': "'%s'" % shingle_type,
                 'minhash_modulo': minhash_modulo,
                 }
@@ -189,10 +197,10 @@ class DatasetPB(object):
         doc = self.get_doc(doc_id)
         if not doc:
             return []
-        bkts = doc.buckets
+        bkts = [CassandraInt.fm_db(bkt) for bkt in doc.buckets]
         mhs = {}
         for bkt in bkts:
-            bkt_docs = session.execute(self.nns_select, [self.ds_key, bkt])
+            bkt_docs = session.execute(self.nns_select, [self.ds_key, CassandraInt.to_db(bkt)])
             for bkt_doc in bkt_docs:
                 mhs[bkt_doc['doc_id']] = bkt_doc['minhashes']
         del mhs[doc_id]
@@ -213,9 +221,9 @@ class DatasetPB(object):
         (found, doc) = self.get_else_create_doc(_id)
         stats['found'] = found
         if found:
-            if 0 == int(1000*time.time()) % 20:
-                # print 5% of the documents on average
-                logging.info('%s %s %s %s',doc['ds_key'], doc['doc_id'], doc['bucket_count'], doc['buckets'])
+            # if 0 == int(1000*time.time()) % 20:
+            #     # print 5% of the documents on average
+            #     logging.info('%s %s',doc['ds_key'], doc['doc_id'])
             return doc
 
         ### Parse
@@ -233,7 +241,6 @@ class DatasetPB(object):
         doc.hashes = doc.rows * self.bands
         doc.seeds = list(self.random_seeds)
         doc.modulo = self.minhash_modulo
-        doc.buckets_per_band = self.buckets_per_band
         doc.sh_type = self.shingle_type
 
         max_hashes = self.rows * self.bands
@@ -244,16 +251,15 @@ class DatasetPB(object):
         doc.buckets = doc.bucketize(doc.minhashes)
         tBucketize = time.time() - t0 - tParse - tMinhash
         stats['bucketize'] = tBucketize
-        doc.bucket_count = len(doc.buckets)
-        if 0 == int(1000*time.time()) % 20:
-            # print 5% of the documents on average
-            logging.info('%s %s %s %s', doc.ds_key, doc.doc_id, doc.bucket_count, doc.buckets)
+
+        # if 0 == int(1000*time.time()) % 20:
+        #     # print 5% of the documents on average
+        #     logging.info('%s %s %s', doc.ds_key, doc.doc_id, doc.buckets)
         data = {
                 'ds_key': "'%s'" % doc.ds_key,
                 'doc_id': "'%s'" % doc.doc_id,
                 'minhashes': str(doc.minhashes).replace('L',''),
                 'buckets': str(doc.buckets).replace('L',''),
-                'bucket_count': str(len(doc.buckets))
                 }
         data_keys = data.keys()
         data_vals = ', '.join([str(data[k]) for k in data_keys])
@@ -262,7 +268,13 @@ class DatasetPB(object):
         document = session.execute(qstring)
         tCassWrite = time.time() - t0 - tParse - tMinhash - tBucketize
         stats['cassandra'] = tCassWrite
-        return document
+        doc_data = {
+                'ds_key': "'%s'" % doc.ds_key,
+                'doc_id': "'%s'" % doc.doc_id,
+                'buckets': doc.buckets,
+                'minhashes': doc.minhashes,
+                }
+        return doc_data
 
 class Document(object):
     __metaclass__ = CassandraTable
@@ -271,7 +283,6 @@ class Document(object):
              'doc_id text',
              'buckets list<int>',
              'minhashes list<int>',
-             'bucket_count int',
              'PRIMARY KEY (doc_id, ds_key)',
              ]
 
@@ -286,13 +297,16 @@ class Document(object):
         def minhashes_for_shingles(shingles):
             def calc_onehash(shingle, seed):
                 def c4_hash(shingle):
-                    hash_val = shingle_cache.get(shingle)
-                    if hash_val:
-                        return hash_val
                     h = struct.unpack('<i',shingle)[0]
                     hash_val = h & max_mask
-                    shingle_cache.set(shingle, hash_val)
                     return hash_val
+                    # hash_val = shingle_cache.get(shingle)
+                    # if hash_val:
+                    #     return hash_val
+                    # h = struct.unpack('<i',shingle)[0]
+                    # hash_val = h & max_mask
+                    # shingle_cache.set(shingle, hash_val)
+                    # return hash_val
                 if self.sh_type == 'c4':
                     return operator.xor(c4_hash(shingle), long(seed)) % self.modulo
                 else:
@@ -316,8 +330,9 @@ class Document(object):
         buckets = []
         for band in xrange(self.dataset.bands):
             minhashes_in_band = [minhashes[band*self.rows + row] for row in xrange(self.rows)]
-            if len(set(minhashes_in_band)) <= 1:
-                buckets.append( (band * self.buckets_per_band) + hash(minhashes_in_band[0]) % self.buckets_per_band )
+            minhashes_strung = '-'.join([str(mh) for mh in minhashes_in_band])
+            buckets.append(CassandraInt.to_db(max_mask & int(hashlib.md5(minhashes_strung).hexdigest(), 16)))
+            # buckets.append(CassandraInt.to_db(max_mask & hash(tuple(minhashes_in_band))))
         return buckets
 
 def main():
@@ -342,15 +357,16 @@ def main():
     infolist = zip_reader.infolist()
     dummydoc = Document.create()            # force the creation of the table
     dataset = DatasetPB.create('bash', filename)    # force the creation of the table and filling it with a row
-    logging.debug('%s %s', dataset.ds_key, dataset.filename)
+    # logging.debug('%s %s', dataset.ds_key, dataset.filename)
     dataset = DatasetPB.find(dataset.ds_key)
     start = time.time()
     all_stats = defaultdict(float)
     new_docs_count = 0
+    docs_cache = Cache(max_size = 15)
     for info in infolist:
         with zip_reader.open(info) as file_reader:
             logging.debug('Reading file %s', info.filename)
-            stats = defaultdict(float)
+            stats = {}
             for line in file_reader.readlines():
                 found_pattern = text_file_pattern.search(line)
                 doc_id = found_pattern.group(1)
@@ -358,7 +374,8 @@ def main():
                 udata=html.decode("utf-8")
                 html=udata.encode("ascii","ignore")
                 html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
-                dataset.create_doc(doc_id, html, stats)
+                doc = dataset.create_doc(doc_id, html, stats)
+                docs_cache.set(doc_id, (html, doc['buckets'] if doc['buckets'] else [], doc['minhashes']))
                 if not stats['found']:
                     new_docs_count += 1
                     for stat in stats:
@@ -366,13 +383,40 @@ def main():
                             all_stats[stat] += stats[stat]
                 stats = {}
             end = time.time()
-            logging.info('File %s %d seconds, stats: %s over %d docs', info.filename, int(0.5+end-start), all_stats, new_docs_count)
+            if new_docs_count:
+                logging.info('File %s %d seconds, stats: %s over %d docs', info.filename, int(0.5+end-start), all_stats, new_docs_count)
             start = end 
     if new_docs_count:
         for stat in all_stats:
             if stat != 'found':
                 all_stats[stat] /= new_docs_count
-    logging.info('Average stats: %s over %d docs', all_stats, new_docs_count)
+        logging.info('Average stats: %s over %d docs', all_stats, new_docs_count)
+    
+    outname = filename.replace('.zip', '.dists.csv')
+    doc_ids = docs_cache.keys()
+    with open(outname, 'wb') as out_handler:
+        fileout = csv.writer(out_handler, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        fileout.writerow(['doc_i', 'doc_j', 'com_bkts', 'jac_dist'])
+        for idx in xrange(len(doc_ids)):
+            (ihtml, ibkts, imhs) = docs_cache.get(doc_ids[idx])
+            for jdx in xrange(idx+1, len(doc_ids)):
+                (jhtml, jbkts, jmhs) = docs_cache.get(doc_ids[jdx])
+                com_bkts = len(set(ibkts) & set(jbkts))
+                jac_dist = 1.0 - reduce(lambda x, y: x+y, map(lambda a,b: a == b, imhs,jmhs)) / float(len(imhs)) 
+                # if jac_dist <= 0.1:
+                #     lev_pick = 50
+                # else:
+                #     lev_pick = 100
+                # if 0 == int(str(uuid.uuid4()).replace('-',''), 16) % lev_pick:
+                #     lev_dist = '%8d' % levenshtein(ihtml, jhtml)
+                # else:
+                #     lev_dist = '...xx...'
+                lev_dist = ''
+                logging.debug(' %s | %s, %3d %6.3f %s %s', doc_ids[idx], doc_ids[jdx], 
+                              com_bkts, jac_dist, lev_dist, sorted(list(set(ibkts) & set(jbkts))))
+                csv_line = [doc_ids[idx], doc_ids[jdx], com_bkts, jac_dist, lev_dist]
+                csv_line.extend(sorted(list(set(ibkts) & set(jbkts))))
+                fileout.writerow(csv_line)
 
 cluster = Cluster()
 keyspace = 'datathinks'
