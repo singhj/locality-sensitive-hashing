@@ -120,6 +120,14 @@ class DatasetPB(object):
         dataset = ds.get(ds_key)
         for k in dataset.keys():
             setattr(ds, k, dataset[k])
+        try:
+            band_bits = int(math.ceil(math.log(ds.bands, 2)))
+            band_mask = (2**band_bits - 1)
+            setattr(ds, 'band_bits', band_bits)
+            setattr(ds, 'band_mask', band_mask)
+            setattr(ds, 'hash_mask', 2**(max_bits - band_bits)-1)
+        except:
+            raise Exception('Unable to compute band_bits for dataset')
         return ds
 
     @classmethod
@@ -328,11 +336,15 @@ class Document(object):
     
     def bucketize(self, minhashes):
         buckets = []
+        band_bits = self.dataset.band_bits
+        band_mask = self.dataset.band_mask
+        hash_mask = self.dataset.hash_mask
         for band in xrange(self.dataset.bands):
+            band_hash = (band_mask & band) * (hash_mask + 1)
             minhashes_in_band = [minhashes[band*self.rows + row] for row in xrange(self.rows)]
-            minhashes_strung = '-'.join([str(mh) for mh in minhashes_in_band])
-            buckets.append(CassandraInt.to_db(max_mask & int(hashlib.md5(minhashes_strung).hexdigest(), 16)))
-            # buckets.append(CassandraInt.to_db(max_mask & hash(tuple(minhashes_in_band))))
+            minhashes_into_a_string = '-'.join([str(mh) for mh in minhashes_in_band])
+            bucket = band_hash | (hash_mask & int(hashlib.md5(minhashes_into_a_string).hexdigest(), 16))
+            buckets.append(CassandraInt.to_db(bucket))
         return buckets
 
 def main():
