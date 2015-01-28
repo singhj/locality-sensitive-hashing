@@ -64,6 +64,8 @@ import mr_main
 urls += mr_main.urls
 import peer_belt_driver
 urls += peer_belt_driver.urls
+import test_db_datastore
+urls += test_db_datastore.urls
 
 sess_config = {}
 sess_config['webapp2_extras.sessions'] = {

@@ -1,8 +1,10 @@
-import sys, os
-dir_path = os.path.dirname([p for p in sys.path if p][0])
-import logging
+import sys, os, logging
 
+dir_path = os.path.dirname([p for p in sys.path if p][0])
 LOG_FILENAME = dir_path+'/Serial.log'
+
+max_bits = 32
+max_mask = 2**max_bits - 1
 
 DATABASES = {
     'default': {

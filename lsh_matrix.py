@@ -10,11 +10,11 @@ from bs4 import BeautifulSoup
 DbType = settings.DATABASES['default']['ENGINE']
 if DbType == 'cassandra':
     from db_cassandra import DbInt, Table
+elif DbType == 'datastore':
+    from db_datastore import DbInt, Table
 else:
     from db_in_memory import DbInt, Table
 
-max_bits = 32
-max_mask = 2**max_bits - 1
 symbols = re.compile('\W+')
 
 class UnknownException(Exception):
@@ -61,7 +61,7 @@ class Matrix(object):
                 for attr in ds:
                     if attr in ('random_seeds', 'buckets'):
                         if ds[attr]:
-                            logging.info('retrieved dataset[%s][0] type %s, value %s', attr, type(ds[attr][0]), max_mask & ds[attr][0])
+                            logging.info('retrieved dataset[%s][0] type %s, value %s', attr, type(ds[attr][0]), settings.max_mask & ds[attr][0])
                     else:
                         logging.info('retrieved dataset[%s] type %s, value %s', attr, type(ds[attr]), ds[attr])
                 return ds
@@ -75,7 +75,7 @@ class Matrix(object):
             band_mask = (2**band_bits - 1)
             setattr(matrix, 'band_bits', band_bits)
             setattr(matrix, 'band_mask', band_mask)
-            setattr(matrix, 'hash_mask', 2**(max_bits - band_bits)-1)
+            setattr(matrix, 'hash_mask', 2**(settings.max_bits - band_bits)-1)
         except:
             raise Exception('Unable to compute band_bits for dataset')
         return matrix
@@ -108,7 +108,7 @@ class Matrix(object):
                 'ds_key': '%s' % ds_key,
                 'source': '%s' % source,
                 'filename': '%s' % filename,
-                'random_seeds': [(max_mask & random.getrandbits(max_bits)) for _ in xrange(max_hashes)],
+                'random_seeds': [(settings.max_mask & random.getrandbits(settings.max_bits)) for _ in xrange(max_hashes)],
                 'rows': rows,
                 'bands': bands,
                 'shingle_type': '%s' % shingle_type,
@@ -230,7 +230,7 @@ class MatrixRow(object):
             def calc_onehash(shingle, seed):
                 def c4_hash(shingle):
                     h = struct.unpack('<i',shingle)[0]
-                    hash_val = h & max_mask
+                    hash_val = h & settings.max_mask
                     return hash_val
 
                 if self.sh_type == 'c4':
@@ -238,7 +238,7 @@ class MatrixRow(object):
                 else:
                     return operator.xor(compute_positive_hash(shingle), long(seed)) % self.modulo
 
-            minhashes = [max_mask for _ in xrange(self.hashes)]
+            minhashes = [settings.max_mask for _ in xrange(self.hashes)]
             for shingle in shingles:
                 for hno in xrange(self.hashes):
                     h_value = calc_onehash(shingle, self.seeds[hno])

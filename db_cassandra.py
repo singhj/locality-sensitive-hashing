@@ -1,9 +1,7 @@
 import sys, struct, os, types, re, pdb
+
 import logging, settings
 logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
-
-max_bits = 32
-max_mask = 2**max_bits - 1
 
 from cassandra.cluster import Cluster
 from cassandra.query import SimpleStatement, dict_factory
@@ -20,11 +18,11 @@ class UnableToCreateTable(Exception):
 class DbInt(object):
     @staticmethod
     def to_db(number):
-        signed = struct.unpack('=l', struct.pack('=L', number & max_mask))[0]
+        signed = struct.unpack('=l', struct.pack('=L', number & settings.max_mask))[0]
         return signed
     @staticmethod
     def fm_db(number):
-        return max_mask & number
+        return settings.max_mask & number
 
 class Table(type):
     """
