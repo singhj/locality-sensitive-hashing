@@ -1,11 +1,7 @@
 import sys, struct, os, types, re, pdb
-import logging
-import settings
-dir_path = os.path.dirname([p for p in sys.path if p][0])
-sys.path.insert(0, 'libs')
+import logging, settings
+logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
 
-LOG_FILENAME = dir_path+'/Serial.log'
-logging.basicConfig(filename=LOG_FILENAME, level=logging.DEBUG)
 max_bits = 32
 max_mask = 2**max_bits - 1
 
