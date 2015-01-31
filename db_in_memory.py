@@ -18,24 +18,12 @@ class Table(type):
     """
     _instances = {}
     def __call__(cls, *args, **kwds):
-        def insert_row(self, *args, **kwds):
-            pks = tuple([kwds['data'][k] for k in self.p_keys])
-            self._rows[pks] = kwds['data']
-            return self._rows[pks]
-        def select_row(self, *args, **kwds):
-            pks = tuple([kwds[k] for k in self.p_keys])
-            try:
-                return self._rows[pks]
-            except KeyError:
-                return None
         if cls not in cls._instances:
             logging.debug('Table %s was created', kwds['name'])
             cls._instances[cls] = super(Table, cls).__call__(*args, **{})
             setattr(cls._instances[cls], 'attrs', kwds['attrs'])
             setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
             setattr(cls._instances[cls], '_rows', {})
-            cls._instances[cls].insert_row = types.MethodType( insert_row, cls._instances[cls] )
-            cls._instances[cls].select_row = types.MethodType( select_row, cls._instances[cls] )
         return cls._instances[cls]
     def select_row(cls, *args, **kwds):
         pks = tuple([kwds[k] for k in cls.p_keys])

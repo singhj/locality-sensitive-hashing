@@ -58,15 +58,15 @@ class Table(type):
                     logging.debug('Table %s was created', kwds['name'])
                 else:
                     raise UnknownException()
-            qry = "SELECT * FROM {name} WHERE {cond}"\
-                .format(name = cls.__name__, cond = ' AND '.join([pk+'=?' for pk in kwds['p_keys']]))
-
-            select = session.prepare(qry)
-            select.consistency_level = ConsistencyLevel.QUORUM
-
-            setattr(cls._instances[cls], 'select', select)
-            setattr(cls._instances[cls], 'attrs', kwds['attrs'])
-            setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
+                qry = "SELECT * FROM {name} WHERE {cond}"\
+                    .format(name = cls.__name__, cond = ' AND '.join([pk+'=?' for pk in kwds['p_keys']]))
+    
+                select = session.prepare(qry)
+                select.consistency_level = ConsistencyLevel.QUORUM
+    
+                setattr(cls._instances[cls], 'select', select)
+                setattr(cls._instances[cls], 'attrs', kwds['attrs'])
+                setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
 
         return cls._instances[cls]
 

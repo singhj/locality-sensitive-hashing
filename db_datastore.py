@@ -1,6 +1,5 @@
-import sys, struct, os, types, re, pdb
+import sys, struct, os, types, re, copy, pdb
 import logging, settings
-logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
 
 from google.appengine.ext import ndb
 
@@ -16,39 +15,56 @@ class DbInt(object):
     def fm_db(number):
         return settings.max_mask & number
 
-class Table(ndb.Model):
+class Table(type):
     """
     A singleton metaclass to ensure that the table exists in the GAE Datastore
     Inspired by http://stackoverflow.com/questions/6760685/creating-a-singleton-in-python
+    
+    We implement it by creating a StorageProxy
     """
     _instances = {}
     def __call__(cls, *args, **kwds):
+        logging.info('Table called cls = %s, kwds = %s', cls, kwds)
         if cls not in cls._instances:
-            def datastore_type(typ):
-                mapper = {
-                    'text': ndb.StringProperty(),
-                    'list<bigint>': ndb.IntegerProperty(repeated = True),
-                    'list<int>': ndb.IntegerProperty(repeated = True),
-                    'int': ndb.IntegerProperty(),
-                    'ascii': ndb.StringProperty(indexed = False),
-                }
-                return mapper[typ]
+            cls._instances[cls] = super(Table, cls).__call__(*args, **{})
+            datastore_type = {
+                'text': ndb.StringProperty(),
+                'list<bigint>': ndb.IntegerProperty(repeated = True),
+                'list<int>': ndb.IntegerProperty(repeated = True),
+                'int': ndb.IntegerProperty(),
+                'ascii': ndb.StringProperty(indexed = False),
+            }
+            attr_list = kwds['attrs']
             attrs = {}
-            for attr in kwds['attrs']:
+            for attr in attr_list:
                 (name, typ) = tuple(attr.split())
-                attrs[name] = datastore_type(typ)
+                attrs[name] = copy.copy(datastore_type[typ])
+            StorageProxy = type(cls.__name__, (ndb.Model,), attrs)
+            logging.info('Creating class %s with attributes %s', cls.__name__, attrs)
+            setattr(cls._instances[cls], 'StorageProxy', StorageProxy)
 
-            cls._instances[cls] = super(Table, cls).__call__(*args, **attrs)
+            gql = "SELECT * FROM {name} WHERE {cond}"\
+                .format(name = cls.__name__, cond = ' AND '.join([kwds['p_keys'][c]+'=:%d'%(c+1) for c in xrange(len(kwds['p_keys']))]))
+            select = ndb.gql(gql)
+
+            setattr(cls._instances[cls], 'select', select)
             setattr(cls._instances[cls], 'attrs', kwds['attrs'])
             setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
 
         return cls._instances[cls]
 
     def select_row(cls, *args, **kwds):
-        query_params = {}
-        for k in cls.p_keys:
-            query_params[k] = kwds[k]
-        retval = cls.query(**query_params).get()
+        pks = tuple([kwds[k] for k in cls.p_keys])
+        qry = cls._instances[cls].select.bind(*pks)
+        retval = qry.get()
+        if not retval: return None
+        logging.info('select returns %s', retval)
+        this = cls()
+        for k in cls._instances[cls].attrs:
+            attr_name = k.split()[0]
+            setattr(this, attr_name, getattr(retval, attr_name))
+        return this
+
     def insert_row(cls, *args, **kwds):
         def to_db(datum, typ):
             mapper = {
@@ -58,13 +74,26 @@ class Table(ndb.Model):
                 'int': lambda x: int(x),
                 'ascii': lambda x: str(x),
             }
-            return mapper[typ](datum)
+            retval = mapper[typ](datum)
+            return retval
 
         data = kwds['data']
-        data_keys = [attr.split()[0] for attr in cls.attrs if attr.split()[0] in data.keys()]
-        data_typs = [attr.split()[1] for attr in cls.attrs if attr.split()[0] in data.keys()]
-        attrs = {}
-        for k in xrange(len(data_kays)):
-            attrs[data_keys[k]] = to_db(data[data_keys[k]], data_typs[k])
-        new_instance = cls(**attrs)
-        return new_instance
+        my_class = cls._instances[cls]
+        key_name = '|'.join([data[k] for k in cls.p_keys])
+        constructor_args = {}
+        for k in cls.p_keys:
+            constructor_args[k] = data[k]
+        new_instance = my_class.StorageProxy.get_or_insert(key_name, **constructor_args)
+        for data_key in my_class.attrs:
+            (data_key_name, data_key_type) = data_key.split()
+            if data_key_name in cls.p_keys: continue
+            if data_key_name not in data: continue
+            setattr(new_instance, data_key_name, to_db(data[data_key_name], data_key_type))
+        logging.info('Inserting %s with %s', new_instance, vars(new_instance))
+        new_instance.put()
+
+        this = cls()
+        for k in cls._instances[cls].attrs:
+            attr_name = k.split()[0]
+            setattr(this, attr_name, getattr(new_instance, attr_name))
+        return this

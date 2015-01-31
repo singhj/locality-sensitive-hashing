@@ -53,8 +53,24 @@ class MainPage(session.BaseRequestHandler):
     def post(self):
         pass
 
+class WaitPage(session.BaseRequestHandler):
+
+    def get(self):
+        template_values = {
+        }
+
+        template = JINJA_ENVIRONMENT.get_template('coming_soon.html')
+        try:
+            self.response.write(template.render(template_values))
+        except UnicodeDecodeError:
+            template_values['tweets'] = 'unreadable content'
+            self.response.write(template.render(template_values))
+    def post(self):
+        pass
+
 urls = [
     ('/', MainPage),
+    ('/coming_soon', WaitPage),
 ]
 import read_tweepy
 urls += read_tweepy.urls

@@ -8,10 +8,10 @@ max_mask = 2**max_bits - 1
 
 DATABASES = {
     'default': {
-        'ENGINE': '',       # Add 'cassandra' or 'gae' or leave blank
+        'ENGINE': 'datastore',       # Add 'cassandra' or 'gae' or leave blank
         'KEYSPACE': 'datathinks',    # Keyspace if using Cassandra
         'NAME': '',     # Or path to database file if using sqlite3.
-        'USER': '',     # 
+        'USER': '',     #
         'PASSWORD': '', # Not used with sqlite3.
         'HOST': '',     # Set to empty string for localhost
         'PORT': '',     # Set to empty string for default.

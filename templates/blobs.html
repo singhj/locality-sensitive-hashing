@@ -22,7 +22,7 @@
         {% for item in items %}
         <tr>
           <td><input type="radio" onclick="updateForm('{{ item.key.urlsafe() }}',
-            '{{ item.blob_key }}', '{{ item.filename }}', '{{ item.output_link }}', '{{ item.result_link }}');"></td>
+            '{{ item.file_key }}', '{{ item.filename }}', '{{ item.output_link }}', '{{ item.result_link }}');"></td>
           <td>{{ item.filename }}</td>
           <td>
             {% if item.output_link %}
@@ -47,7 +47,7 @@
       {% endif %}
       <br />
       <br />
-      <form action="/blobs" method="post">
+      <form action="/{{ top_form_url }}" method="post">
         Input File: <label id="jobName">none selected</label>
         <input type="hidden" name="filename" id="filename" value="">
         <input type="hidden" name="blobkey" id="blobkey" value="">

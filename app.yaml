@@ -19,8 +19,14 @@ handlers:
   static_files: static/js/custom.js
   upload: static/js/custom.js
 
+- url: /assets
+  static_dir: twitter-bootstrap/assets
+
 #- url: /mapreduce(/.*)?
 #  script: libs.mapreduce.main.APP
+
+- url: /coming_soon
+  script: main.application
 
 - url: /.*
   script: main.application

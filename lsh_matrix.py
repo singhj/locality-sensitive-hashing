@@ -26,6 +26,7 @@ class Matrix(object):
              'ds_key text',
              'source text',
              'filename text',
+             'file_key text',
              'lsh_output text',
              'eval_output text',
              'count_output text',
@@ -81,18 +82,23 @@ class Matrix(object):
         return matrix
 
     @classmethod
-    def create(cls, source, filename,  
+    def _initialize(cls):
+        matrix = Matrix(name = cls.__name__, attrs = cls.attrs, p_keys = cls.p_keys)
+        return matrix
+
+    @classmethod
+    def create(cls, source, filename, file_key = '',
                rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
 
         # Make sure the underlying tables exist
-        matrix = Matrix(name = cls.__name__, attrs = cls.attrs, p_keys = cls.p_keys)
+        cls._initialize()
 
         max_iters = 4
         for iter_count in xrange(max_iters):
-            ds_key = '%04d' % (abs(hash(source + filename + ' ' * iter_count)) % (10 ** 4))
+            ds_key = 'k%04d' % (int(hashlib.md5(source + filename + ' ' * iter_count).hexdigest(), 16) % 10000)
             try:
                 # Does a dataset with this ID already exist?
-                this_ds = Matrix.select_row(ds_key = ds_key) # get(ds_key)
+                this_ds = Matrix.select_row(ds_key = ds_key)
                 if not this_ds:
                     break
                 if this_ds.filename == filename:
@@ -100,7 +106,6 @@ class Matrix(object):
                     return this_ds
             except ValueError:
                 raise Exception('WTF?')
-        matrix.ds_key = ds_key
         if iter_count == max_iters - 1:
             raise Exception("Unable to create Dataset ID")
         max_hashes = rows * bands
@@ -108,6 +113,7 @@ class Matrix(object):
                 'ds_key': '%s' % ds_key,
                 'source': '%s' % source,
                 'filename': '%s' % filename,
+                'file_key': '%s' % file_key,
                 'random_seeds': [(settings.max_mask & random.getrandbits(settings.max_bits)) for _ in xrange(max_hashes)],
                 'rows': rows,
                 'bands': bands,
@@ -122,7 +128,7 @@ class Matrix(object):
             doc = MatrixRow.select_row(ds_key = self.ds_key, doc_id = doc_id)
             if doc:
                 return True, doc
-        except: 
+        except:
             pass
         doc = MatrixRow(name = 'MatrixRow', attrs = MatrixRow.attrs, p_keys = MatrixRow.p_keys)
         doc.ds_key = self.ds_key
@@ -220,10 +226,14 @@ class MatrixRow(object):
     indexes = [('doc_buckets', 'buckets',)]
 
     @classmethod
+    def _initialize(cls):
+        # Make sure the underlying tables or data structures exist
+        matrix_row = MatrixRow(name = cls.__name__, attrs = cls.attrs, p_keys = cls.p_keys, indexes = cls.indexes)
+        return matrix_row
+
+    @classmethod
     def create(cls):
-        # Make sure the underlying tables exist
-        doc = MatrixRow(name = cls.__name__, attrs = cls.attrs, p_keys = cls.p_keys, indexes = cls.indexes)
-        return doc
+        return cls._initialize()
 
     def calc_minhashes(self):
         def minhashes_for_shingles(shingles):

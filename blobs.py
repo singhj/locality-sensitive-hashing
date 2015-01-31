@@ -79,7 +79,8 @@ class MainHandler(webapp2.RequestHandler):
             {"username": username,
              "items": items,
              "length": length,
-             "upload_url": upload_url}))
+             "upload_url": upload_url,
+             "top_form_url": "blobs"}))
 
     def post(self):
         filename = self.request.get("filename")
