@@ -206,7 +206,8 @@ class Matrix(object):
         data = {
                 'ds_key': '%s' % doc.ds_key,
                 'doc_id': '%s' % doc.doc_id,
-                'minhashes': doc.minhashes,
+                # Don't need to store minhashes
+                # 'minhashes': doc.minhashes,
                 'buckets': doc.buckets,
                 }
         MatrixRow.insert_row(data = data)
@@ -220,7 +221,8 @@ class MatrixRow(object):
              'ds_key text',
              'doc_id text',
              'buckets list<int>',
-             'minhashes list<int>',
+             # Don't need to store minhashes
+             # 'minhashes list<int>',
              ]
     p_keys = ['doc_id', 'ds_key']
     indexes = [('doc_buckets', 'buckets',)]
