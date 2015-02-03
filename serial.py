@@ -13,7 +13,7 @@ except ImportError:
         @staticmethod
         def defer(*args, **kwargs):
             args1 = args[1:]
-            globals()[args[0]](*args1, **kwargs)
+            args[0](*args1, **kwargs)
 
 from utils.levenshtein import levenshtein
 from lsh_matrix import Matrix, MatrixRow
