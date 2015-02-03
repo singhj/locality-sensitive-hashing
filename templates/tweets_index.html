@@ -1,20 +1,23 @@
-<!DOCTYPE html>
-{% autoescape true %}
-<html>
-  <head>
-    <link type="text/css" rel="stylesheet" href="/stylesheets/main.css" />
-  </head>
-  <body>
-	{% if tw_auth %}
-		<!-- 
-	    <form action="/twitter_get_tweets" method="post">
-	        <input type="submit" value="Get tweets">
-	    </form>
-	     -->
-	    <br />
-	    <form action="/twitter_read_node" method="post">
-	        <input type="submit" value="Twitter Read Node">
-	    </form>
+{% extends "base.html" %}
+
+    {% block main_content %}
+
+      <!-- Main hero unit for a primary marketing message or call to action -->
+      <div class="hero-unit">
+        <h1>Open LSH</h1>
+        <h2>Locality Sensitive Hashing</h2>
+      </div>
+
+    {% if tw_auth %}
+        <!-- 
+        <form action="/twitter_get_tweets" method="post">
+            <input type="submit" value="Get tweets">
+        </form>
+         -->
+        <br />
+        <form action="/twitter_read_node" method="post">
+            <input type="submit" value="Twitter Read Node">
+        </form>
         <p>{{ tw_status|safe }}</p>
         <p></p>
         <p>&mdash; {{ tweets|safe }}</p>
@@ -28,7 +31,4 @@
     </form>
     {% endif %}
     <a href="{{ url|safe }}">{{ url_linktext }}</a>
-
-  </body>
-</html>
-{% endautoescape %}
+    {% endblock main_content %}

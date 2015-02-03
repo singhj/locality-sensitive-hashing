@@ -6,12 +6,70 @@ import logging
 
 logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
 
+try:
+    from google.appengine.ext import deferred
+except ImportError:
+    class deferred(object):
+        @staticmethod
+        def defer(*args, **kwargs):
+            args1 = args[1:]
+            globals()[args[0]](*args1, **kwargs)
+
 from utils.levenshtein import levenshtein
 from lsh_matrix import Matrix, MatrixRow
 from utils.procache import Cache
 
-text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
+class PeerbeltLine(object):
+    text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
+    @staticmethod
+    def parse(line):
+        found_pattern = PeerbeltLine.text_file_pattern.search(line)
+        doc_id = found_pattern.group(1)
+        html = found_pattern.group(2)
+        udata = html.decode("utf-8")
+        html = udata.encode("ascii","ignore")
+        html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
+        return doc_id, html
+         
 shingle_cache = Cache(max_size = 1)
+
+def lsh_text(LineFormat, zip_reader, filename, matrix_key, text_filename):
+    logging.info('<TextWorker filename={filename} text_filename={text_filename}>'\
+        .format(filename=filename, text_filename=text_filename))
+
+    text_file_pattern = re.compile('^."id":"([^"]*):html","text":"(.*".*).', flags=re.DOTALL)
+    infolist = zip_reader.infolist()
+    Matrix._initialize()
+    MatrixRow._initialize()
+    dataset = Matrix.find(matrix_key)
+    for info in infolist:
+        if info.filename == text_filename:
+            break
+
+    with zip_reader.open(info) as text_reader:
+        logging.debug('Reading file %s', info.filename)
+        stats = {}
+        for line in text_reader:
+            doc_id, text = LineFormat.parse(line)
+            doc = dataset.create_doc(doc_id, text, stats)
+            stats = {}
+    logging.info('</TextWorker filename={filename} text_filename={text_filename}>'\
+        .format(filename=filename, text_filename=text_filename))
+
+def lsh_zipfile(LineFormat, zip_reader, source, filename, file_key = ''):
+    infolist = zip_reader.infolist()
+    dummydoc = MatrixRow.create()            # force the creation of the table
+    dataset = Matrix.create(source, filename, file_key)    # force the creation of the table and filling it with a row
+    dataset = Matrix.find(dataset.ds_key)
+    start = time.time()
+    all_stats = defaultdict(float)
+    new_docs_count = 0
+    docs_cache = Cache(max_size = 15)
+    for info in infolist:
+        with zip_reader.open(info) as text_reader:
+            logging.debug('Reading file %s', info.filename)
+            deferred.defer(lsh_text, LineFormat, zip_reader, filename, matrix_key = dataset.ds_key, text_filename = info.filename)
+    return
 
 def main():
     """
@@ -32,61 +90,7 @@ def main():
         print 'file {file} is not a zip file'.format(file = filename)
         exit(1)
 
-    infolist = zip_reader.infolist()
-    dummydoc = MatrixRow.create()            # force the creation of the table
-    dataset = Matrix.create('bash', filename)    # force the creation of the table and filling it with a row
-    # logging.debug('%s %s', dataset.ds_key, dataset.filename)
-    dataset = Matrix.find(dataset.ds_key)
-    start = time.time()
-    all_stats = defaultdict(float)
-    new_docs_count = 0
-    docs_cache = Cache(max_size = 15)
-    for info in infolist:
-        with zip_reader.open(info) as file_reader:
-            logging.debug('Reading file %s', info.filename)
-            stats = {}
-            for line in file_reader.readlines():
-                found_pattern = text_file_pattern.search(line)
-                doc_id = found_pattern.group(1)
-                html = found_pattern.group(2)
-                udata = html.decode("utf-8")
-                html = udata.encode("ascii","ignore")
-                html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
-                doc = dataset.create_doc(doc_id, html, stats)
-                docs_cache.set(doc_id, (html, doc.buckets if doc.buckets else [], doc.minhashes))
-                if not stats['found']:
-                    new_docs_count += 1
-                    for stat in stats:
-                        if stat != 'found':
-                            all_stats[stat] += stats[stat]
-                stats = {}
-            end = time.time()
-            if new_docs_count:
-                logging.info('File %s %d seconds, stats: %s over %d docs', info.filename, int(0.5+end-start), all_stats, new_docs_count)
-            start = end 
-    if new_docs_count:
-        for stat in all_stats:
-            if stat != 'found':
-                all_stats[stat] /= new_docs_count
-        logging.info('Average stats: %s over %d docs', all_stats, new_docs_count)
-    
-    outname = filename.replace('.zip', '.dists.csv')
-    doc_ids = docs_cache.keys()
-    with open(outname, 'wb') as out_handler:
-        fileout = csv.writer(out_handler, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-        fileout.writerow(['doc_i', 'doc_j', 'com_bkts', 'jac_dist'])
-        for idx in xrange(len(doc_ids)):
-            (ihtml, ibkts, imhs) = docs_cache.get(doc_ids[idx])
-            for jdx in xrange(idx+1, len(doc_ids)):
-                (jhtml, jbkts, jmhs) = docs_cache.get(doc_ids[jdx])
-                com_bkts = len(set(ibkts) & set(jbkts))
-                jac_dist = 1.0 - reduce(lambda x, y: x+y, map(lambda a,b: a == b, imhs,jmhs)) / float(len(imhs)) 
-                lev_dist = ''
-                logging.debug(' %s | %s, %3d %6.3f %s %s', doc_ids[idx], doc_ids[jdx], 
-                              com_bkts, jac_dist, lev_dist, sorted(list(set(ibkts) & set(jbkts))))
-                csv_line = [doc_ids[idx], doc_ids[jdx], com_bkts, jac_dist, lev_dist]
-                csv_line.extend(sorted(list(set(ibkts) & set(jbkts))))
-                fileout.writerow(csv_line)
+    lsh_zipfile(PeerbeltLine, zip_reader, 'bash', filename)
 
 if __name__ == "__main__":
     main()

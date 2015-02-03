@@ -45,3 +45,6 @@ libraries:
   version: latest
 - name: ssl
   version: latest
+
+builtins:
+- deferred: on

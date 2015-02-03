@@ -1,5 +1,6 @@
 *.py[cod]
 *~
+twitter_settings.py
 
 # C extensions
 *.so

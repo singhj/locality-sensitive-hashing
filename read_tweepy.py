@@ -3,45 +3,28 @@ import tweepy
 from tweepy import StreamListener
 import time
 from tweepy.api import API
+
 from google.appengine.ext import ndb
 import twitter_settings
 import logging
 from pipe_node import PipeNode, NotFound, NotLoggedIn
-from data_queues.fifo_queue import FIFOQueue
-
-from lsh.lsh.lsh_base import LshBase
-from lsh.lsh.lsh_jaccard import LshJaccard
-from lsh.utils.similarity import jaccard_similarity
-from lsh.utils.similarity import compute_positive_hash
-from lsh.models.documents.jaccard_document import JaccardDocument
-from lsh.utils.similarity import jaccard_similarity
-from lsh.shingles.shingles import shingle_generator, ShingleType
-from lsh.minhash import minhash
 
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
-DEFAULT_NUM_TWEETS = 800
+DEFAULT_NUM_TWEETS = 400
+REPORT_AFTER_COUNT = 80
 
 class TwitterStatusListener(StreamListener):
 
-    def __init__(self, queue, api=None, num_tweets=0, language=None):
+    def __init__(self, api=None):
         StreamListener.__init__(self, api=api)
         self.api = api or API()
-        self.tweet_counter = 0
-        self.language = language # should be a ISO 639-1 code
-
-        if num_tweets == 0:
-            self.num_tweets = DEFAULT_NUM_TWEETS
-        else:
-            self.num_tweets = num_tweets
-
+        self.tweets = []
         self.start_time = time.gmtime()
         self.prefix = str(int(time.time()))
-        self.queue = queue
 
     def on_connect(self):
         """Called once connected to streaming server.
-
         This will be invoked once a successful response
         is received from the server. Allows the listener
         to perform some work prior to entering the read loop.
@@ -50,21 +33,16 @@ class TwitterStatusListener(StreamListener):
 
     def on_status(self, status):
         """Called when a new status arrives"""
-        self.tweet_counter += 1
-        text = status.text
-        lang = status.user.lang
+        text = status.text #.encode('utf-8')
+        self.tweets.append(text) 
+#         status = TwitterStatus(text = text)
+#         status.put()
+        #logging.info('status: %s', text)
 
-        # filter by languauge if one was given otherwise add all tweets to queue.
-        if self.language:
-            if lang.lower() == self.language.lower():
-                self.queue.enqueue(text)
-        else:
-            self.queue.enqueue(text)
-
-        if self.tweet_counter == self.num_tweets:
+        if len(self.tweets) >= DEFAULT_NUM_TWEETS:
             return False # this should trigger closing the connection
         else:
-            return True # always return True if we want to keep the connection open
+            return True
 
     def on_error(self, status_code):
         logging.info('Error: ' + str(status_code) + "\n")
@@ -80,6 +58,7 @@ class TwitterLogin(session.BaseRequestHandler):
         auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
         # Redirect user to Twitter to authorize
         url = auth.get_authorization_url()
+        logging.info("TwitterLogin url=%s", url)
         self.session['request_token_key'] = auth.request_token.key
         self.session['request_token_secret'] = auth.request_token.secret
         self.redirect(url)
@@ -89,7 +68,6 @@ class TwitterLogin(session.BaseRequestHandler):
 class TwitterLogout(session.BaseRequestHandler):
     def get(self):
         self.session['tw_auth'] = None
-        self.session['tweets'] = []
         self.redirect('/')
         return
     def post(self):
@@ -114,6 +92,7 @@ class TwitterCallback(session.BaseRequestHandler):
         auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
         auth.set_request_token(self.session['request_token_key'], self.session['request_token_secret'])
 
+        logging.info('Callback came with %s', resp)
         try:
             auth.get_access_token(verifier)
         except tweepy.TweepError:
@@ -125,22 +104,22 @@ class TwitterCallback(session.BaseRequestHandler):
 
 
 class TwitterGetTweets(session.BaseRequestHandler):
-    def get(self):
+    def get_tweets(self):
         auth = self.session['tw_auth']
         api = tweepy.API(auth)
-        data_queue = FIFOQueue.instance()
-        listener = TwitterStatusListener(queue=data_queue, api=api, language="en")
+        listen = TwitterStatusListener(api)
 
         #note, tried doing secure=False which is not support by twitter api this gives an
         # error for the sample.json end_point
-        stream = tweepy.Stream(auth, listener)
+        stream = tweepy.Stream(auth, listen)
+        logging.info("getting stream now!")
 
         try:
             stream.sample()
         except tweepy.TweepError:
             logging.error("error with streaming api")
             stream.disconnect()
-        return (listener)
+        return (listen.tweets)
 
     def post(self):
         self.get()
@@ -150,81 +129,69 @@ class TwitterStreamDump(ndb.Model):
     content = ndb.TextProperty()
 
 class TwitterReadNode(TwitterGetTweets, PipeNode):
-    def open(self):
+    def Open(self):
+        logging.info('TwitterReadNode.Open() have twitter token: %s', 'yes' if 'tw_auth' in self.session else 'no')
         if not ('tw_auth' in self.session):
-            logging.error("Not logged in into twitter, tw_auth key not found in session dict")
-            raise NotLoggedIn("Not logged in into twitter...auth not in session dict")
+            logging.error('Not logged in into twitter')
+            raise NotLoggedIn("Not logged in into twitter")
         auth = self.session['tw_auth']
         api = tweepy.API(auth)
-
         if not api:
-            logging.error("Not logged in into twitter, no tweepy api")
-            raise NotLoggedIn("Not logged in into twitter...no tweepy api")
+            logging.error('API not found')
+            raise NotLoggedIn("Not logged in into twitter")
         
         # Read tweets from the stream
-        self.twitter_listener = super(TwitterReadNode, self).get()
-
+        logging.info('TwitterReadNode.Open using %s', auth)
+        self.tweets = super(TwitterReadNode, self).get_tweets()
+        self.cursor = 0
+        self.count = len(self.tweets)
+        
         logging.info('TwitterReadNode.Open completed')
-
-    def get_next(self):
-        while not self.twitter_listener.queue.empty():
-            yield self.twitter_listener.queue.dequeue()
-
+    
+    def GetNext(self):
+        if self.cursor < self.count:
+            tweet = self.tweets[self.cursor]
+            if 0 == (self.cursor % REPORT_AFTER_COUNT):
+                logging.info('TwitterReadNode.GetNext (%d) = %s', self.cursor, tweet)
+            self.cursor += 1
+            return tweet
         raise NotFound('Tweets exhausted')
     
-    def close(self, save=False):
+    def Close(self, save = False):
+        logging.info('TwitterReadNode.Close()')
         tweets = '<br/>\n&mdash; '.join(self.tweets)
         if save:
-            all_the_tweets = TwitterStreamDump(content=tweets)
+            all_the_tweets = TwitterStreamDump(content = str(self.tweets))
             all_the_tweets.put()
 
         logging.info('TwitterReadNode.Close completed')
-
-        num_tweets_status = "Number of tweets received - %s" % str(self.twitter_listener.tweet_counter)
-        banner = 'Done getting tweets at %s. %s' % (time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()), num_tweets_status)
-
+        banner = 'Done getting tweets at %s' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()) 
         self.session['tw_status'] = banner
         self.session['tweets'] = tweets
+        logging.info('TwitterReadNode.Close after (%d) tweets', len(self.tweets))
         self.redirect('/')
-
+    
+    def get(self):
+        logging.info('TwitterReadNode.get()')
+        self.post()
     def post(self):
+        logging.info('TwitterReadNode.post()')
         try:
-            self.open()
-            self.tweets = []
-            self.lshj = LshJaccard(num_bands=20, rows_per_band=10)
+            self.Open()
         except:
             self.session['tw_auth'] = None
             self.redirect('/')
             return
-
+        
         while True:
             try:
-                for shingles_list, original_document in shingle_generator(self.get_next()):
-                    # get minhash signatures for each shingle list
-                    min_hash_signatures = minhash.run(shingles_list)
-
-                    #create document and run LSH for Jaccard Distance
-                    doc_obj = JaccardDocument(original_document, shingles_list, min_hash_signatures)
-
-                    logging.info('Running Jaccard LSH Current Tweet: %s', original_document)
-
-                    results = self.lshj.run(doc_obj)
-                    if results:
-                        logging.info('.....RESULTS.....')
-                        logging.info('.....score: %s', str(results['score']))
-                        logging.info('.....match_found: %s', str(results['match_found']))
-                        logging.info(results['document_1'])
-                        logging.info(results['document_2'])
-                        logging.info('---------------------------------------------------')
-                        logging.info('Results: %s', str(results['score']))
-
-                        #TODO update the code the read this and prints out score, docs and match boolean flag
-                        #self.tweets.append(str(results['score']))
+                self.GetNext()
             except NotFound as nf:
-                logging.error('TwitterReadNode.GetNext completed, %s', nf.value)
+                logging.info('TwitterReadNode.GetNext completed, %s', nf.value)
                 break
-
-        self.close(save=True)
+        
+        self.Close(save = True)
+#         self.Close()
 
 urls = [
      ('/twitter_login', TwitterLogin),

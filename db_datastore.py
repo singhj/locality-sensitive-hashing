@@ -24,7 +24,9 @@ class Table(type):
     """
     _instances = {}
     def __call__(cls, *args, **kwds):
-        logging.info('Table called cls = %s, kwds = %s', cls, kwds)
+        if kwds:
+            #logging.info('Table called cls = %s, kwds = %s', cls, kwds)
+            pass
         if cls not in cls._instances:
             cls._instances[cls] = super(Table, cls).__call__(*args, **{})
             datastore_type = {
@@ -58,7 +60,7 @@ class Table(type):
         qry = cls._instances[cls].select.bind(*pks)
         retval = qry.get()
         if not retval: return None
-        logging.info('select returns %s', retval)
+#         logging.info('select returns %s', retval)
         this = cls()
         for k in cls._instances[cls].attrs:
             attr_name = k.split()[0]
@@ -89,7 +91,7 @@ class Table(type):
             if data_key_name in cls.p_keys: continue
             if data_key_name not in data: continue
             setattr(new_instance, data_key_name, to_db(data[data_key_name], data_key_type))
-        logging.info('Inserting %s with %s', new_instance, vars(new_instance))
+        logging.debug('Inserting %s with %s', new_instance, vars(new_instance))
         new_instance.put()
 
         this = cls()
