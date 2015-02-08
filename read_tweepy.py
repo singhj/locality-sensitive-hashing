@@ -1,18 +1,22 @@
-import session
+import session, time, logging, hashlib
+from collections import defaultdict
+
 import tweepy
 from tweepy import StreamListener
-import time
 from tweepy.api import API
-
-from google.appengine.ext import ndb
 import twitter_settings
-import logging
-from pipe_node import PipeNode, NotFound, NotLoggedIn
+
+from google.appengine.api import users
+from google.appengine.ext import ndb
+
+from utils.deferred import deferred
+from pipe_node import *
+from lsh_matrix import *
 
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
-DEFAULT_NUM_TWEETS = 400
-REPORT_AFTER_COUNT = 80
+DEFAULT_NUM_TWEETS = 200
+REPORT_AFTER_COUNT = 40
 
 class TwitterStatusListener(StreamListener):
 
@@ -102,7 +106,6 @@ class TwitterCallback(session.BaseRequestHandler):
         self.session['tw_status'] = 'Logged In and Ready'
         self.redirect('/')
 
-
 class TwitterGetTweets(session.BaseRequestHandler):
     def get_tweets(self):
         auth = self.session['tw_auth']
@@ -124,9 +127,33 @@ class TwitterGetTweets(session.BaseRequestHandler):
     def post(self):
         self.get()
 
-class TwitterStreamDump(ndb.Model):
+class Tweet(ndb.Model):
+    t = ndb.TextProperty()
+    def str(self):
+        return self.t
+    
+class DemoUserInfo(ndb.Model):
     asof = ndb.DateTimeProperty(auto_now_add=True)
-    content = ndb.TextProperty()
+    user_id = ndb.StringProperty()
+    email = ndb.StringProperty()
+    nickname = ndb.StringProperty()
+    ds_key = ndb.StringProperty()
+    calculating = ndb.BooleanProperty(default = False)
+    calc_done = ndb.BooleanProperty(default = False)
+    def filename(self):
+        return 'user_id: {user_id}, email: {email}, nickname: {nickname}, asof: {asof}' \
+            .format(asof = self.asof.isoformat()[:19], user_id = self.user_id, email = self.email, nickname = self.nickname)
+    @classmethod
+    def latest_for_user(cls, user):
+        dui = cls.query(cls.user_id == user.user_id()).order(-cls.asof).get()
+        return dui
+    def purge(self):
+        ds_key = self.ds_key
+        matrix = Matrix.find(ds_key = self.ds_key)
+        if matrix:
+            matrix.purge()
+        tweet_keys = Tweet.query(ancestor = self.key).fetch(keys_only = True)
+        ndb.delete_multi(tweet_keys)
 
 class TwitterReadNode(TwitterGetTweets, PipeNode):
     def Open(self):
@@ -159,21 +186,32 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
     
     def Close(self, save = False):
         logging.info('TwitterReadNode.Close()')
-        tweets = '<br/>\n&mdash; '.join(self.tweets)
         if save:
-            all_the_tweets = TwitterStreamDump(content = str(self.tweets))
-            all_the_tweets.put()
+            # DemoUserInfo
+            u = users.get_current_user()
+            old_dui = DemoUserInfo.latest_for_user(u)
+            dui = DemoUserInfo(user_id = u.user_id(), email = u.email(), nickname = u.nickname())
+            duik = dui.put()
+            self.session['duik'] = duik.urlsafe()
+            tweets = [ Tweet(parent = duik, t = t) for t in self.tweets ]
+            keys = ndb.put_multi(tweets)
+            if old_dui:
+                old_dui.purge()
+                old_dui.key.delete()
 
         logging.info('TwitterReadNode.Close completed')
-        banner = 'Done getting tweets at %s' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()) 
+        banner = 'Tweets as of %s GMT' % time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime()) 
         self.session['tw_status'] = banner
-        self.session['tweets'] = tweets
+        self.session['tweets'] = '<br/>\n&mdash; '.join(self.tweets)
         logging.info('TwitterReadNode.Close after (%d) tweets', len(self.tweets))
+        self.session['fetched'] = True
+        self.session['calc_done'] = False
         self.redirect('/')
     
     def get(self):
         logging.info('TwitterReadNode.get()')
         self.post()
+
     def post(self):
         logging.info('TwitterReadNode.post()')
         try:
@@ -193,10 +231,147 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
         self.Close(save = True)
 #         self.Close()
 
+class TweetLine(object):
+    @staticmethod
+    def parse(tweet):
+        doc_id = str(tweet.key.id())
+        text = tweet.t
+        text = text.lower()
+        text = ' '.join(text.split())
+        return doc_id, text
+
+def lsh_iter(LineFormat, iterator, ds_key):
+    matrix = Matrix.find(ds_key)
+    logging.info('<TextWorker filename={filename}>'\
+        .format(filename = matrix.filename))
+
+    line_count = 0
+    for line in iterator:
+        line_count += 1
+        stats = {}
+        doc_id, text = LineFormat.parse(line)
+        doc = matrix.create_doc(doc_id, text, stats)
+        if 0 == (line_count % 80):
+            logging.debug('<Tweet count %d, id %s, text %s />', line_count, doc_id, text)
+        stats = {}
+
+    logging.info('</TextWorker filename={filename}>'\
+        .format(filename = matrix.filename))
+
+    if matrix.file_key:
+        duik = ndb.Key(urlsafe = matrix.file_key)
+        dui = duik.get()
+        dui.ds_key = ds_key
+        dui.calc_done = True
+        dui.calculating = False
+        dui.put()
+
+def lsh_report(ds_key, duik):
+    def report(tweet_set_buckets, tweet_sets):
+        msg = ''
+        for set_hash in tweet_set_buckets:
+            msg += '\nFor %d tweets, %d buckets: %s' % \
+            (len(tweet_sets[set_hash]), len(tweet_set_buckets[set_hash]), tweet_set_buckets[set_hash])
+            tweets = ndb.get_multi(tweet_sets[set_hash])
+            tweet_text_list = [tw.t for tw in tweets]
+            tweet_text_set = set(tweet_text_list)
+            for tweet_text in tweet_text_set:
+                tweet_ids = [tweet.key.id() for tweet in tweets if tweet.t == tweet_text]
+                msg += '\n    %s' % tweet_ids
+                msg += '\n    %s' % tweet_text
+        return msg
+                    
+    def display(bkt, tweets):
+        lines = []
+        lines.append('bucket: %d' % bkt)
+        for tweet in tweets:
+            lines.append('    %s' % tweet.t)
+        return '\n'.join(lines)
+
+    try:
+        matrix = Matrix.find(ds_key)
+#     logging.debug(str(matrix))
+        matrix_rows = matrix.find_child_rows()
+    except AttributeError:
+        logging.error('Unable to find matrix_rows for ds_key %s', ds_key)
+        raise
+    dui = ndb.Key(urlsafe = duik).get()
+    dui_id = ndb.Key(urlsafe = duik).id()
+#     logging.debug('LshTweets %s, %d, %d rows', dui, dui_id, len(matrix_rows))
+    bucket_tweets = defaultdict(list)
+
+    row_count = 0
+    for matrix_row in matrix_rows:
+        row_count += 1
+        for bkt in matrix_row.buckets:
+            bucket_tweets[bkt].append(int(matrix_row.doc_id))
+    bkt_count = len(bucket_tweets.keys())
+    logging.info('LshTweets %s for %d rows has %d buckets', dui, row_count, bkt_count)
+    tweet_sets = {}
+    tweet_set_buckets = defaultdict(list)
+    for bkt in bucket_tweets:
+        if len(bucket_tweets[bkt]) > 1:
+            tweet_ids = bucket_tweets[bkt]
+#             logging.debug('tweet_ids = %s', tweet_ids)
+            tweet_keys = [ndb.Key(DemoUserInfo, dui_id, Tweet, _id) for _id in tweet_ids]
+            composite_set_key = ''.join(sorted([tk.urlsafe() for tk in tweet_keys]))
+            set_hash = '%07d' % (int(hashlib.md5(composite_set_key).hexdigest(), 16) % 10000000)
+            tweet_sets[set_hash] = tweet_keys
+            tweet_set_buckets[set_hash].append(bkt)
+    retval = report(tweet_set_buckets, tweet_sets)
+    logging.info(retval)
+    return retval
+#             logging.debug('tweet_ids = %s', tweet_keys)
+#             tweets = ndb.get_multi(tweet_keys)
+#             logging.info(display(bkt, tweets))
+            
+class LshTweets(session.BaseRequestHandler):
+    @staticmethod
+    def calc(session):
+        duik = session['duik']
+        dui = ndb.Key(urlsafe = duik).get() if duik else None
+        logging.info('LshTweets %s', dui)
+        tweet_qry = Tweet.query(ancestor = dui.key).fetch()
+        Matrix._initialize()
+        MatrixRow._initialize()
+        matrix = Matrix.create(filename = dui.filename(), 
+                               source = 'tweets', file_key = duik,
+                               rows=5, bands=15, shingle_type='c4', minhash_modulo=7001)
+        ds_key = matrix.ds_key
+
+        if matrix:
+            dui.calc_done = False
+            dui.calculating = True
+            dui.put()
+            deferred.defer(lsh_iter, TweetLine, tweet_qry, ds_key)
+
+    @staticmethod
+    def show(session):
+        duik = session['duik']
+        dui = ndb.Key(urlsafe = duik).get() if duik else None
+        try:
+            ds_key = dui.ds_key
+            session['lsh_results'] = lsh_report(ds_key, duik)
+        except AttributeError: 
+            session['lsh_results'] = 'Error has occurred. Staff has been notified.'
+            logging.error('LshTweets.show unable to find dui key %s', duik)
+#         ds_key = Matrix.make_new_id(source = 'tweets', filename = str(dui))
+        
+#         deferred.defer(lsh_report, ds_key, dui.key)
+
+#     def get(self):
+#         LshTweets.calc_lsh_results(self.session)
+#         self.redirect('/')
+# 
+#     def post(self):
+#         LshTweets.calc_lsh_results(self.session)
+#         self.redirect('/')
+
 urls = [
      ('/twitter_login', TwitterLogin),
      ('/twitter_callback', TwitterCallback),
 #      ('/twitter_get_tweets', TwitterGetTweets),
      ('/twitter_read_node', TwitterReadNode),
      ('/twitter_logout', TwitterLogout),
+#      ('/lsh_tweets', LshTweets),
 ]

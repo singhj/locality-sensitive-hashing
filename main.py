@@ -4,17 +4,32 @@ import webapp2
 import session
 
 from google.appengine.api import users
+from google.appengine.ext import ndb
 
 JINJA_ENVIRONMENT = jinja2.Environment(
     loader=jinja2.FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates')),
     extensions=['jinja2.ext.autoescape'],
     autoescape=True)
 
+import read_tweepy
+
 class MainPage(session.BaseRequestHandler):
 
-    def get(self):
+    def get(self, command = ''):
+        def lookup(dict_or_obj, flag):
+            try:
+                # could be a dictionary or a NoneType
+                flag_value = dict_or_obj[flag]
+            except (KeyError, TypeError):
+                try:
+                    # could have it as an attribute
+                    flag_value = getattr(dict_or_obj, flag)
+                except AttributeError:
+                    flag_value = False
+            return flag_value
 
-        if users.get_current_user():
+        u = users.get_current_user()
+        if u:
             url = users.create_logout_url(self.request.uri)
             url_linktext = 'Google Logout'
         else:
@@ -31,9 +46,21 @@ class MainPage(session.BaseRequestHandler):
             tw_status = self.session['tw_status']
         except: pass
 
-        tweets = ''
+        duik = lookup(self.session, 'duik')
+        dui = ndb.Key(urlsafe = duik).get() if duik else None
+
+        if not dui:        
+            dui = read_tweepy.DemoUserInfo.latest_for_user( u )
+            self.session['duik'] = dui.key.urlsafe() if dui else None
+
+        display = ''
         try:
-            tweets = self.session['tweets']
+            if command == 'show_lsh_results':
+                display = '<pre>\n%s\n</pre>' % self.session['lsh_results']
+            elif command == 'calc_lsh':
+                display = self.session['tweets']
+            else:
+                display = self.session['tweets']
         except: pass
 
         template_values = {
@@ -41,7 +68,10 @@ class MainPage(session.BaseRequestHandler):
             'url_linktext': url_linktext,
             'tw_auth': tw_auth,
             'tw_status': tw_status,
-            'tweets': tweets
+            'display': display,
+            'fetched': lookup(self.session, 'fetched'),
+            'calculating': lookup(dui, 'calculating'),
+            'calc_done': lookup(dui, 'calc_done'),
         }
 
         template = JINJA_ENVIRONMENT.get_template('tweets_index.html')
@@ -51,10 +81,14 @@ class MainPage(session.BaseRequestHandler):
             template_values['tweets'] = 'unreadable content'
             self.response.write(template.render(template_values))
     def post(self):
-        pass
+        cmd = self.request.get('command')
+        if cmd == 'calc_lsh':
+            read_tweepy.LshTweets.calc(self.session)
+        elif cmd == 'show_lsh_results':
+            read_tweepy.LshTweets.show(self.session)
+        self.get(cmd)
 
 class WaitPage(session.BaseRequestHandler):
-
     def get(self):
         template_values = {
         }

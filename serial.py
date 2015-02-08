@@ -1,23 +1,18 @@
 import sys, os, re, time, math, random, struct, zipfile, operator, csv, hashlib, uuid, pdb, types
-import settings
+import settings, logging
 
 from collections import defaultdict
-import logging
+sys.path.insert(0, 'libs')
+from bs4 import BeautifulSoup
+from utils.deferred import deferred
 
 logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
-
-try:
-    from google.appengine.ext import deferred
-except ImportError:
-    class deferred(object):
-        @staticmethod
-        def defer(*args, **kwargs):
-            args1 = args[1:]
-            args[0](*args1, **kwargs)
 
 from utils.levenshtein import levenshtein
 from lsh_matrix import Matrix, MatrixRow
 from utils.procache import Cache
+
+symbols = re.compile('\W+')
 
 class PeerbeltLine(object):
     text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
@@ -25,11 +20,16 @@ class PeerbeltLine(object):
     def parse(line):
         found_pattern = PeerbeltLine.text_file_pattern.search(line)
         doc_id = found_pattern.group(1)
-        html = found_pattern.group(2)
-        udata = html.decode("utf-8")
-        html = udata.encode("ascii","ignore")
-        html = html.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
-        return doc_id, html
+        text = found_pattern.group(2)
+        udata = text.decode("utf-8")
+        text = udata.encode("ascii","ignore")
+        text = text.replace('\\n',' ').replace('\\t',' ').replace("'", "''")
+        soup = BeautifulSoup(text.replace('\\n',' '))
+        [s.extract() for s in soup(['script', 'style'])]
+        text = soup.get_text(separator=' ', strip=True)
+        text = symbols.sub(' ', text.lower())
+        text = ' '.join(text.split())
+        return doc_id, text
          
 shingle_cache = Cache(max_size = 1)
 
@@ -37,7 +37,6 @@ def lsh_text(LineFormat, zip_reader, filename, matrix_key, text_filename):
     logging.info('<TextWorker filename={filename} text_filename={text_filename}>'\
         .format(filename=filename, text_filename=text_filename))
 
-    text_file_pattern = re.compile('^."id":"([^"]*):html","text":"(.*".*).', flags=re.DOTALL)
     infolist = zip_reader.infolist()
     Matrix._initialize()
     MatrixRow._initialize()

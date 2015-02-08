@@ -6,7 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="">
     <meta name="author" content="">
-
+{% block meta %}
+{% endblock meta %}
     <!-- Le styles -->
     <link href="../assets/css/bootstrap.css" rel="stylesheet">
     <style type="text/css">
@@ -31,10 +32,6 @@
   </head>
 
   <body>
-{% block facebook %}
-<div id="fb-root"></div>
-<script src="http://connect.facebook.net/en_US/all.js"></script>
-{% endblock facebook %}
 
     <div class="container">
     

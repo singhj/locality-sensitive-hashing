@@ -17,14 +17,6 @@ from serial import lsh_zipfile, PeerbeltLine
 from lsh.utils.similarity import compute_positive_hash
 from lsh.shingles.shingles import _get_list_of_shingles
 
-sys.path.insert(0, 'libs')
-from bs4 import BeautifulSoup
-
-url_file_pattern = re.compile('^."id":"([^"]*)","url":"([^"]*)".*')
-text_file_pattern = re.compile('^{"id":"([^"]*):html","text":"(.*)}', flags=re.DOTALL)
-symbols = re.compile('\W+')
-
-
 class TestHandler(webapp2.RequestHandler):
     template_env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"),
                                       autoescape=True)

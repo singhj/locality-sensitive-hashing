@@ -1,11 +1,9 @@
 import sys, struct, os, time, types, re, math, random, operator, hashlib, pdb
 import logging, settings
 logging.basicConfig(filename=settings.LOG_FILENAME, level=logging.DEBUG)
-sys.path.insert(0, 'libs')
 
 from lsh.shingles.shingles import _get_list_of_shingles
 from lsh.utils.similarity import compute_positive_hash
-from bs4 import BeautifulSoup
 
 DbType = settings.DATABASES['default']['ENGINE']
 if DbType == 'cassandra':
@@ -14,8 +12,6 @@ elif DbType == 'datastore':
     from db_datastore import DbInt, Table
 else:
     from db_in_memory import DbInt, Table
-
-symbols = re.compile('\W+')
 
 class UnknownException(Exception):
     pass
@@ -56,6 +52,7 @@ class Matrix(object):
 
     @classmethod
     def get(cls, ds_key):
+        cls._initialize()
         if ds_key:
             ds = cls.select_row(ds_key = ds_key)
             if ds:
@@ -70,16 +67,13 @@ class Matrix(object):
     
     @classmethod
     def find(cls, ds_key):
+        cls._initialize()
         matrix = Matrix.select_row(ds_key = ds_key)
-        try:
-            band_bits = int(math.ceil(math.log(matrix.bands, 2)))
-            band_mask = (2**band_bits - 1)
-            setattr(matrix, 'band_bits', band_bits)
-            setattr(matrix, 'band_mask', band_mask)
-            setattr(matrix, 'hash_mask', 2**(settings.max_bits - band_bits)-1)
-        except:
-            raise Exception('Unable to compute band_bits for dataset')
         return matrix
+
+    def find_child_rows(self):
+        MatrixRow._initialize()
+        return MatrixRow.select_all(parent = self)
 
     @classmethod
     def _initialize(cls):
@@ -87,12 +81,8 @@ class Matrix(object):
         return matrix
 
     @classmethod
-    def create(cls, source, filename, file_key = '',
-               rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
-
-        # Make sure the underlying tables exist
+    def make_new_id(cls, source, filename):
         cls._initialize()
-
         max_iters = 4
         for iter_count in xrange(max_iters):
             ds_key = 'k%04d' % (int(hashlib.md5(source + filename + ' ' * iter_count).hexdigest(), 16) % 10000)
@@ -103,11 +93,23 @@ class Matrix(object):
                     break
                 if this_ds.filename == filename:
                     logging.debug("A dataset with %s already exists, reusing", filename)
-                    return this_ds
+                    return ds_key
             except ValueError:
                 raise Exception('WTF?')
         if iter_count == max_iters - 1:
             raise Exception("Unable to create Dataset ID")
+        return ds_key
+    
+    @classmethod
+    def create(cls, source, filename, file_key = '',
+               rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
+
+        cls._initialize()
+
+        logging.debug('Matrix.create inputs %s, %s, %s', source, filename, file_key)        
+        ds_key = cls.make_new_id(source, filename)
+        logging.debug('Matrix.create ds_key %s', ds_key)        
+
         max_hashes = rows * bands
         data = {
                 'ds_key': '%s' % ds_key,
@@ -121,7 +123,13 @@ class Matrix(object):
                 'minhash_modulo': minhash_modulo,
                 }
         Matrix.insert_row(data = data)
-        return cls.find(ds_key)
+        matrix = cls.find(ds_key)
+        logging.debug('Matrix.create returning %s', matrix)
+        return matrix
+
+    def str(self):
+        txt = '<Matrix ds_key={ds_key} />'.format(ds_key = self.ds_key)
+        return txt
 
     def get_else_create_doc(self, doc_id):
         try:
@@ -145,6 +153,14 @@ class Matrix(object):
         except:
             pass
         return None
+
+    def docs_iterator(self):
+        return MatrixRow.select_all(ds_key = self.ds_key)
+
+    def purge(self):
+        MatrixRow._initialize()
+        MatrixRow.delete_all(parent = self)
+        Matrix.delete_row(ds_key = self.ds_key)
 
     def get_nns(self, doc_id):
         doc = self.get_doc(doc_id)
@@ -176,11 +192,6 @@ class Matrix(object):
 
         ### Parse
         t0 = time.time()
-        soup = BeautifulSoup(text.replace('\\n',' '))
-        [s.extract() for s in soup(['script', 'style'])]
-        text = soup.get_text(separator=' ', strip=True)
-        text = symbols.sub(' ', text.lower())
-        text = ' '.join(text.split())
         doc.text = text
         tParse = time.time() - t0
         stats['parse'] = tParse
@@ -241,7 +252,14 @@ class MatrixRow(object):
         def minhashes_for_shingles(shingles):
             def calc_onehash(shingle, seed):
                 def c4_hash(shingle):
-                    h = struct.unpack('<i',shingle)[0]
+                    try:
+                        h = struct.unpack('<i',shingle)[0]
+                    except struct.error:
+                        # We land here when the shingle has non-ascii characters in it.
+                        size = 4
+                        encoded = shingle.encode('utf-8')
+                        int_hashes = [int(encoded[i:i + size].encode('hex'), 16) for i in range(len(encoded)/size)] 
+                        h = reduce(operator.xor, int_hashes)
                     hash_val = h & settings.max_mask
                     return hash_val
 
@@ -266,7 +284,16 @@ class MatrixRow(object):
     
     def bucketize(self, minhashes):
         buckets = []
-        band_bits = self.dataset.band_bits
+        try:
+            band_bits = self.dataset.band_bits
+        except AttributeError:
+            matrix = self.dataset
+            band_bits = int(math.ceil(math.log(matrix.bands, 2)))
+            band_mask = (2**band_bits - 1)
+            setattr(matrix, 'band_bits', band_bits)
+            setattr(matrix, 'band_mask', band_mask)
+            setattr(matrix, 'hash_mask', 2**(settings.max_bits - band_bits)-1)
+
         band_mask = self.dataset.band_mask
         hash_mask = self.dataset.hash_mask
         for band in xrange(self.dataset.bands):

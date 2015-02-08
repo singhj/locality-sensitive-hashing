@@ -44,28 +44,63 @@ class Table(type):
             StorageProxy = type(cls.__name__, (ndb.Model,), attrs)
             logging.info('Creating class %s with attributes %s', cls.__name__, attrs)
             setattr(cls._instances[cls], 'StorageProxy', StorageProxy)
+            setattr(cls._instances[cls], 'attrs', kwds['attrs'])
+            setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
 
             gql = "SELECT * FROM {name} WHERE {cond}"\
                 .format(name = cls.__name__, cond = ' AND '.join([kwds['p_keys'][c]+'=:%d'%(c+1) for c in xrange(len(kwds['p_keys']))]))
             select = ndb.gql(gql)
-
             setattr(cls._instances[cls], 'select', select)
-            setattr(cls._instances[cls], 'attrs', kwds['attrs'])
-            setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
+
+            parent_keys = kwds['p_keys'][1:]
+            if parent_keys:
+                gql = "SELECT * FROM {name} WHERE {cond}"\
+                    .format(name = cls.__name__, cond = ' AND '.join([parent_keys[c]+'=:%d'%(c+1) for c in xrange(len(parent_keys))]))
+                select_all_with_parent = ndb.gql(gql)
+                setattr(cls._instances[cls], 'select_all_with_parent', select_all_with_parent)
 
         return cls._instances[cls]
 
     def select_row(cls, *args, **kwds):
-        pks = tuple([kwds[k] for k in cls.p_keys])
-        qry = cls._instances[cls].select.bind(*pks)
-        retval = qry.get()
+        retval = cls.select_proxy(*args, **kwds)
         if not retval: return None
-#         logging.info('select returns %s', retval)
         this = cls()
         for k in cls._instances[cls].attrs:
             attr_name = k.split()[0]
             setattr(this, attr_name, getattr(retval, attr_name))
         return this
+
+    def delete_row(cls, *args, **kwds):
+        proxy = cls.select_proxy(*args, **kwds)
+        if proxy:
+            proxy.key.delete()
+
+    def select_proxy(cls, *args, **kwds):
+        pks = tuple([kwds[k] for k in cls.p_keys])
+        qry = cls._instances[cls].select.bind(*pks)
+        retval = qry.get()
+        if not retval: return None
+        return retval
+
+    def select_all(cls, *args, **kwds):
+        parent = kwds['parent']
+        parent_class = parent.__class__
+
+        parent_kwds = {}
+        for p_key in parent_class.p_keys:
+            parent_kwds[p_key] = getattr(parent, p_key)
+        parent_proxy = parent_class.select_proxy(**parent_kwds)
+
+        bindings = tuple([getattr(parent_proxy, attr) for attr in parent_class.p_keys])        
+        qry = cls._instances[cls].select_all_with_parent.bind(*bindings)
+
+        retval = qry.fetch()
+        return retval
+
+    def delete_all(cls, *args, **kwds):
+        entities = cls.select_all(*args, **kwds)
+        keys = [entity.key for entity in entities]
+        ndb.delete_multi_async(keys)
 
     def insert_row(cls, *args, **kwds):
         def to_db(datum, typ):
@@ -91,7 +126,6 @@ class Table(type):
             if data_key_name in cls.p_keys: continue
             if data_key_name not in data: continue
             setattr(new_instance, data_key_name, to_db(data[data_key_name], data_key_type))
-        logging.debug('Inserting %s with %s', new_instance, vars(new_instance))
         new_instance.put()
 
         this = cls()
