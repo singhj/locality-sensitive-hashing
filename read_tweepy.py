@@ -65,6 +65,7 @@ class TwitterLogin(session.BaseRequestHandler):
         logging.info("TwitterLogin url=%s", url)
         self.session['request_token_key'] = auth.request_token.key
         self.session['request_token_secret'] = auth.request_token.secret
+#         logging.info('Session keys: %s',  self.session.keys())
         self.redirect(url)
     def post(self):
         self.get()
@@ -92,11 +93,11 @@ class TwitterCallback(session.BaseRequestHandler):
         resp = self.get_args()
         rqst = self.request
         verifier = rqst.get('oauth_verifier')
+        logging.info('Callback came with %s, session keys were %s', resp, self.session.keys())
 
         auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
         auth.set_request_token(self.session['request_token_key'], self.session['request_token_secret'])
 
-        logging.info('Callback came with %s', resp)
         try:
             auth.get_access_token(verifier)
         except tweepy.TweepError:
@@ -145,6 +146,8 @@ class DemoUserInfo(ndb.Model):
             .format(asof = self.asof.isoformat()[:19], user_id = self.user_id, email = self.email, nickname = self.nickname)
     @classmethod
     def latest_for_user(cls, user):
+        if not user:
+            return None
         dui = cls.query(cls.user_id == user.user_id()).order(-cls.asof).get()
         return dui
     def purge(self):

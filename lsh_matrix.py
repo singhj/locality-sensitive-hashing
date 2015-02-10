@@ -69,6 +69,8 @@ class Matrix(object):
     def find(cls, ds_key):
         cls._initialize()
         matrix = Matrix.select_row(ds_key = ds_key)
+        if not matrix:
+            logging.warning('Matrix.find failed to find matrix with ds_key %s', ds_key)
         return matrix
 
     def find_child_rows(self):
@@ -104,7 +106,8 @@ class Matrix(object):
     def create(cls, source, filename, file_key = '',
                rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
 
-        cls._initialize()
+        logging.debug('Matrix.create cls = %s, vars = %s', cls, vars(cls))
+        Matrix._initialize()
 
         logging.debug('Matrix.create inputs %s, %s, %s', source, filename, file_key)        
         ds_key = cls.make_new_id(source, filename)
@@ -123,7 +126,7 @@ class Matrix(object):
                 'minhash_modulo': minhash_modulo,
                 }
         Matrix.insert_row(data = data)
-        matrix = cls.find(ds_key)
+        matrix = Matrix.find(ds_key)
         logging.debug('Matrix.create returning %s', matrix)
         return matrix
 

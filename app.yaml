@@ -28,6 +28,12 @@ handlers:
 - url: /coming_soon
   script: main.application
 
+- url: /twitter_.*
+  script: main.application
+
+- url: /
+  script: main.application
+
 - url: /.*
   script: main.application
   login: admin

@@ -64,6 +64,7 @@ class MainPage(session.BaseRequestHandler):
         except: pass
 
         template_values = {
+            'google_logged_in': u,
             'url': url,
             'url_linktext': url_linktext,
             'tw_auth': tw_auth,
@@ -72,6 +73,7 @@ class MainPage(session.BaseRequestHandler):
             'fetched': lookup(self.session, 'fetched'),
             'calculating': lookup(dui, 'calculating'),
             'calc_done': lookup(dui, 'calc_done'),
+            'showing_lsh_results': command == 'show_lsh_results',
         }
 
         template = JINJA_ENVIRONMENT.get_template('tweets_index.html')
