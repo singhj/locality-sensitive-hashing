@@ -270,27 +270,26 @@ def lsh_iter(LineFormat, iterator, ds_key):
         dui.put()
 
 def lsh_report(ds_key, duik):
-    def report(tweet_set_buckets, tweet_sets):
+    def report(tweet_set_buckets, tweet_sets, matrix_bands):
         msg = ''
         for set_hash in tweet_set_buckets:
-            msg += '\nFor %d tweets, %d buckets: %s' % \
-            (len(tweet_sets[set_hash]), len(tweet_set_buckets[set_hash]), tweet_set_buckets[set_hash])
             tweets = ndb.get_multi(tweet_sets[set_hash])
             tweet_text_list = [tw.t for tw in tweets]
             tweet_text_set = set(tweet_text_list)
+            max_tweet_len = max([len(t) for t in tweet_text_set])
+            if max_tweet_len < 4:
+                # For very short tweets, nothing would have been shingled, so buckets are meaningless
+                continue
+            if len(tweet_set_buckets[set_hash]) == matrix_bands:
+                msg += '<p>%d identical tweets</p>' % len(tweet_sets[set_hash])
+            else:
+                msg += '<p>%d similar tweets, similarity=%d%%</p>' % (len(tweet_sets[set_hash]), int(0.5+100.0*len(tweet_sets[set_hash])/matrix_bands))
             for tweet_text in tweet_text_set:
-                tweet_ids = [tweet.key.id() for tweet in tweets if tweet.t == tweet_text]
-                msg += '\n    %s' % tweet_ids
-                msg += '\n    %s' % tweet_text
+#                 tweet_ids = [tweet.key.id() for tweet in tweets if tweet.t == tweet_text]
+#                 msg += '\n    %s' % tweet_ids
+                msg += '<p>&nbsp;&nbsp; %s</p>' % tweet_text
         return msg
                     
-    def display(bkt, tweets):
-        lines = []
-        lines.append('bucket: %d' % bkt)
-        for tweet in tweets:
-            lines.append('    %s' % tweet.t)
-        return '\n'.join(lines)
-
     try:
         matrix = Matrix.find(ds_key)
 #     logging.debug(str(matrix))
@@ -321,12 +320,9 @@ def lsh_report(ds_key, duik):
             set_hash = '%07d' % (int(hashlib.md5(composite_set_key).hexdigest(), 16) % 10000000)
             tweet_sets[set_hash] = tweet_keys
             tweet_set_buckets[set_hash].append(bkt)
-    retval = report(tweet_set_buckets, tweet_sets)
+    retval = report(tweet_set_buckets, tweet_sets, matrix.bands)
     logging.info(retval)
     return retval
-#             logging.debug('tweet_ids = %s', tweet_keys)
-#             tweets = ndb.get_multi(tweet_keys)
-#             logging.info(display(bkt, tweets))
             
 class LshTweets(session.BaseRequestHandler):
     @staticmethod

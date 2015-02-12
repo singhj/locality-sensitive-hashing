@@ -1,7 +1,6 @@
-import os
-import jinja2
-import webapp2
+import os, webapp2, jinja2
 import session
+import settings
 
 from google.appengine.api import users
 from google.appengine.ext import ndb
@@ -56,7 +55,7 @@ class MainPage(session.BaseRequestHandler):
         display = ''
         try:
             if command == 'show_lsh_results':
-                display = '<pre>\n%s\n</pre>' % self.session['lsh_results']
+                display = '%s' % self.session['lsh_results']
             elif command == 'calc_lsh':
                 display = self.session['tweets']
             else:
@@ -74,6 +73,7 @@ class MainPage(session.BaseRequestHandler):
             'calculating': lookup(dui, 'calculating'),
             'calc_done': lookup(dui, 'calc_done'),
             'showing_lsh_results': command == 'show_lsh_results',
+            'gaCode': settings.gaCode,
         }
 
         template = JINJA_ENVIRONMENT.get_template('tweets_index.html')
@@ -93,6 +93,7 @@ class MainPage(session.BaseRequestHandler):
 class WaitPage(session.BaseRequestHandler):
     def get(self):
         template_values = {
+            'gaCode': settings.gaCode,
         }
 
         template = JINJA_ENVIRONMENT.get_template('coming_soon.html')

@@ -19,3 +19,27 @@ DATABASES = {
         'PORT': '',     # Set to empty string for default.
     },
 }
+
+from os import environ
+env_is_appengine = 'INSTANCE_ID' in environ.keys()
+
+try:
+    app_version = os.environ['CURRENT_VERSION_ID']
+    isProd = True
+except:
+    app_version = 'local'
+    isProd = False
+gaOthr = 'UA-26503514-4'
+gaProd = 'UA-26503514-4'
+gaCode = gaProd if isProd else gaOthr
+
+# env2url = {
+#         'isProd': 'http://open-lsh.datathinks.org/',
+#         'local': 'http://localhost:8080',
+#         }
+# url2env = dict((v,k) for k, v in env2url.iteritems())
+# 
+# extName = env2url['isProd']
+# application_id = app_identity.get_application_id()
+# application_name = 'OpenLSH'
+
