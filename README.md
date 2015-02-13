@@ -1,93 +1,69 @@
 OpenLSH
 =======
 
-Stages
-------
+OpenLSH is an open source platform that implements Locality Sensitive Hashing. 
 
-OpenLSH is an open source platform that implements Locality Sensitive Hashing. It encompasses an end-to-end architecture comprising the following _stages_:
- 1. Data mining from social media: Twitter, LinkedIn, Github, &hellip;,
- 2. Filtering incoming data,
- 3. Shingling,
- 4. Minhashes,
- 5. Locality sensitive hashing and
- 6. Candidate matching.
+Demo
+----
 
-The OpenLSH framework is designed with a pipelining architecture and be extensible.
+To familiarize yourself with LSH, please visit the [demo site](http://open-lsh.datathinks.org).
 
-Flexible Pipelining
--------------------
+To try it, you will need a Gmail-based account and a Twitter account. 
+ 1. Log in using your Google credentials.
+ 2. Log in using your Twitter credentials.
+ 3. Start by pressing the _Get Tweets_ button. It gets the most recent 200 tweets from the Twitter public stream and displaying them.
+ 4. Press the _Run LSH_ button. It takes about a minute. When the analysis is complete, a _Show duplicate or near-duplicate tweets_ button appears.
+ 5. Press the _Show duplicate or near-duplicate tweets_ and it shows the tweets that were duplicates or near-duplicates.
 
-Each of the stages listed above is implemented using operators which can run as independent threads. 
-Each operator can be implemented as an iterator, which is class with three three methods that allows a consumer of the result of the physical operator to get the result one _item_ at a time. The three methods forming the iterator
-for an operation are:
+That is the main idea of LSH: the incoming "Documents" &mdash; tweets in this case &mdash; are assigned to "buckets".
+This can be done as documents come in from the source or all at once, as in the demo.
+The resulting buckets can be examined and identical or similar documents just fall into the same buckets.  
 
- 1. 0pen (). This method starts the process of getting items, but does not get
-    an item. It initializes any data structures needed to perform the operation
-    and calls 0pen() for any arguments of the operation.
- 2. GetNext (). This method returns the next item in the result and adjusts
-    data structures as necessary to allow subsequent items to be obtained.
-    In getting the next item of its result, it typically calls GetNext() one
-    or more times on its argument(s). If there are no more items to return,
-    GetNext () returns a special value NotFound, which we assume cannot be
-    mistaken for a item.
- 3. Close (). This method ends the iteration after all items, or all items that the consumer wanted, have been obtained. Typically, it calls Close () on any arguments of the operator.
+Architecture
+------------
 
-`lshIterator` is a base class from which the above stages are derived. It defines Open(), GetNext(), and
-Close() methods on instances of the class. Each stage class, in turn, provides a default implementation for its function (mining, filtering, etc). The flexibility of the OpenLSH framework comes from the fact that the the default base classes representing each stage can be further inherited and modified for specific implementations.
+Central to OpenLSH is a sparse matrix data structure `Matrix`. 
+It has as many rows as there are documents and as many columns as there are buckets (up to 2<sup>32</sup> buckets in this implementation).
+A related data structure `MatrixRow` represents a document.
 
-The code, especially the GetNext () method, makes heavy use of the `yield` command in Python. In case you are not familiar with it, [here is an explanation] (http://stackoverflow.com/questions/231767/the-python-yield-keyword-explained).
+A line format class specifies how to parse incoming documents. 
+The line format class should specify a static method `parse` which returns a document ID and the text to be used for classification.
+See classes `TweetLine` and `PeerbeltLine` in the code base as examples.
+You may follow the implementation of PeerbeltLine as a template for parsing documents in your implementation &mdash; 
+the original text is HTML and we strip out content between `<script>` and `<style>` tags and also remove other HTML tags before assigning documents to buckets.
+In this case, documents that have the same text but differ only in their markup are considered to be identical.
 
-The first implementation will be based on Google App Engine and written in Python. The data will be stored as shown:
+A database format class specifies how to interact with the database. `settings.py` specifies which database is being used.
+Implementations are available for Google App Engine Datastore and for Cassandra. 
+An in-memory database based on Python data structures is also available and we find it pretty handy for testing.
 
-| Stage        | Data Storage for Results                                |
-|:-------------|:--------------------------------------------------------|
-| `mining`     | Blobstore                                               |
-| `filtering`  | Blobstore                                               |
-| `shingling`  | Blobstore                                               |
-| `minhash`    | Datastore                                               |
-| `LSH buckets`| Datastore                                               |
-| `matching`   | Datastore                                               |
+Getting Started
+---------------
 
+To start, replicate the code in your own App Engine instance.
 
-Implementation thus far
------------------------
+ 1. Download the source code (`git clone https://github.com/singhj/locality-sensitive-hashing.git`).
+ 2. Get yourself a [Google App Engine account] (https://cloud.google.com/appengine/docs).
+ 3. [Create a Twitter App] (https://apps.twitter.com/) and change `twitter_settings.py` as appropriate.
+    Take care to specify a Callback URL correctly and 
+    Ours is `http://open-lsh.datathinks.org/twitter_callback`, yours should be customized to your setup.
+ 4. Change the application name in `app.yaml`.
+ 5. [Deploy] (https://cloud.google.com/appengine/docs/python/tools/uploadinganapp#Python_Uploading_the_app) to App Engine and verify.
 
-The problems we had with using the streaming API have been resolved and the code has been updated.
+Working from source data in a file
+----------------------------------
 
-To read tweets,
- 1. Download the repo
- 2. Get your own consumer_key and consumer_secret from the Twitter App [Registration page](https://apps.twitter.com/).
-    - The consumer keys are your application api key and secret key.
- 3. Set up callback URL appropriately.
- 4. Change application id in app.yaml and push the code
-    - If you set up 2-step Verification on your google user account you will need to create an application specific password. This will be the application you use when you deploy your GAE app.
-    - Go to more info: https://support.google.com/accounts/answer/185833?hl=en for more info.
- 5. Visit <your application id>.appspot.com/get_tweets in your favorite browser.
- 6. You will need to give permission to invoke the Twitter API on your behalf
- 7. The tweets will be visible in the logs. Go to https://appengine.google.com/ and navigate to logs for your application.
+Example Peerbelt data is provided in the `example_data` directory. To try OpenLSH against this file,
 
-Testing
-----------
+ 1. Change `settings.py` to use the in-memory database.
+ 2. Run `serial.py` specifying the provided data file as input.
 
-We are using nose and mock to aid with unit testing various OpenLSH modules. These libraries
-are included in the project as they are needed by Google App Engine. You will need to install these
-on your local development machine as well.
+Adapt the code to your particular use case.
 
-To install testing libraries (assumes you have pip installed) from the command line type the following commands:
-* install nose: pip install nose
-* install mock: pip install mock
+Pull Requests
+-------------
 
-To run all tests:
- 1. From the command line navigate to the to /tests in each package.
- 2. Type the following command: nosetests [test_python_file_name].py
-
-To run individual test method:
- 1. From the command line navigate to the to /tests in each package.
- 2. Type the following command: nosetests [test_python_file_name].py:test_method_name
-
-To turn off capturing stdout during tests: 
-nosetests --nocapture
-
+We are open to receiving pull requests, especially if you are implementing another database driver.
 
 References
 ----------
