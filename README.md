@@ -17,7 +17,9 @@ To try it, you will need a Gmail-based account and a Twitter account.
 
 That is the main idea of LSH: the incoming "Documents" &mdash; tweets in this case &mdash; are assigned to "buckets".
 This can be done as documents come in from the source or all at once, as in the demo.
-The resulting buckets can be examined and identical or similar documents just fall into the same buckets.  
+The resulting buckets can be examined and identical or similar documents just fall into the same buckets.
+Each document will fall into multiple buckets &mdash; the number is configurable, see the `bands` variable in `Matrix` constructor.
+It is not a perfect indicator but the number of buckets two documents have in common is suggestive of their similarity (more common buckets = more similarity).   
 
 Architecture
 ------------
@@ -43,27 +45,44 @@ Getting Started
 To start, replicate the code in your own App Engine instance.
 
  1. Download the source code (`git clone https://github.com/singhj/locality-sensitive-hashing.git`).
- 2. Get yourself a [Google App Engine account] (https://cloud.google.com/appengine/docs).
- 3. [Create a Twitter App] (https://apps.twitter.com/) and change `twitter_settings.py` as appropriate.
+ 2. [Create a Twitter App] (https://apps.twitter.com/) and change `twitter_settings.py` as appropriate.
     Take care to specify a Callback URL correctly and 
     Ours is `http://open-lsh.datathinks.org/twitter_callback`, yours should be customized to your setup.
+ 3. Get yourself a [Google App Engine account] (https://cloud.google.com/appengine/docs) and register an application name.
  4. Change the application name in `app.yaml`.
  5. [Deploy] (https://cloud.google.com/appengine/docs/python/tools/uploadinganapp#Python_Uploading_the_app) to App Engine and verify.
 
-Working from source data in a file
-----------------------------------
+Working from source data in a file, running from the command line
+-----------------------------------------------------------------
 
 Example Peerbelt data is provided in the `example_data` directory. To try OpenLSH against this file,
 
  1. Change `settings.py` to use the in-memory database.
  2. Run `serial.py` specifying the provided data file as input.
 
-Adapt the code to your particular use case.
+Changes for your use case
+-------------------------
+
+First, write a line format class for parsing your input data. 
+
+Second, if you are working with a different database than Cassandra or Datastore,
+you will need to write a database driver; we can help with this if you need.
+
+A command-line implementation is available in `serial.py`, which may be adapted if you will be running from the command line.
+A web-based implementation is available in `read_tweepy.py`.
+A map-reduce based implementation may be available soon, contact us for details.
+
+The implementation is intended to be compact; we don't store intermediate results (i.e., minhash values) in the database.
+To compute the similarity of two documents, we need to programmatically compare them. And we do.
+You may wish to make a different trade-off, and uncomment the minhash lines in the implementation of `MatrixRow`.
+
+Some of the LSH parameters are embedded in the `Matrix` constructor. They should be factored into `settings.py`. 
+Some day soon, but until then, you may want to make the changes in the constructor to suit your use case.
 
 Pull Requests
 -------------
 
-We are open to receiving pull requests, especially if you are implementing another database driver.
+If you are implementing another database driver, or other changes that would benefit others, please send a pull request.
 
 References
 ----------
