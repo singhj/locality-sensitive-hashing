@@ -104,7 +104,10 @@ class Matrix(object):
     
     @classmethod
     def create(cls, source, filename, file_key = '',
-               rows=15, bands=15, shingle_type='c4', minhash_modulo=7001):
+               rows = settings.rows, 
+               bands = settings.bands, 
+               shingle_type = settings.shingle_type, 
+               minhash_modulo = settings.minhash_modulo):
 
         logging.debug('Matrix.create cls = %s, vars = %s', cls, vars(cls))
         Matrix._initialize()
@@ -283,7 +286,12 @@ class MatrixRow(object):
         return minhashes
     
     def shingles(self):
-        return self.text.split() if self.sh_type=='w' else set(_get_list_of_shingles(self.text))
+        return MatrixRow.shingle_text(self.text, self.sh_type)
+
+    @staticmethod
+    def shingle_text(text, sh_type):
+        retval = set(text.split()) if sh_type=='w' else set(_get_list_of_shingles(text))
+        return retval
     
     def bucketize(self, minhashes):
         buckets = []

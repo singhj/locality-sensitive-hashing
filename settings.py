@@ -6,6 +6,11 @@ LOG_FILENAME = dir_path+'/Serial.log'
 max_bits = 32
 max_mask = 2**max_bits - 1
 
+bands=15            # Number of buckets per document 
+rows=5              # Number of minhashes that should be combined to give us the bucket ID.
+shingle_type='c4'   # Whether we are using word shingles (w) or character shingles (c4, for four characters)
+minhash_modulo=7001 # A large divisor
+
 DATABASES = {
     'default': {
         'ENGINE': 'datastore',       # Add 'cassandra' or 'datastore' or leave blank

@@ -4,7 +4,7 @@ from collections import defaultdict
 import tweepy
 from tweepy import StreamListener
 from tweepy.api import API
-import twitter_settings
+import settings, twitter_settings
 
 from google.appengine.api import users
 from google.appengine.ext import ndb
@@ -271,25 +271,39 @@ def lsh_iter(LineFormat, iterator, ds_key):
 
 def lsh_report(ds_key, duik):
     def report(tweet_set_buckets, tweet_sets, matrix_bands):
+#         logging.info('tweet_set_buckets = %s, \ntweet_sets = %s, \nmatrix_bands = %d',
+#                      tweet_set_buckets, tweet_sets, matrix_bands)
         msg = ''
         for set_hash in tweet_set_buckets:
             tweets = ndb.get_multi(tweet_sets[set_hash])
+#             logging.debug('set_hash = %s, tweets = %s', set_hash, tweets)
             tweet_text_list = [tw.t for tw in tweets]
             tweet_text_set = set(tweet_text_list)
             max_tweet_len = max([len(t) for t in tweet_text_set])
             if max_tweet_len < 4:
                 # For very short tweets, nothing would have been shingled, so buckets are meaningless
                 continue
-            if len(tweet_set_buckets[set_hash]) == matrix_bands:
-                msg += '<p>%d identical tweets</p>' % len(tweet_sets[set_hash])
+            n = len(tweet_sets[set_hash])
+            if len(tweet_text_set) == 1:
+                msg += '<p>%d identical tweets</p>' % n
+                msg += '<p>&nbsp;&nbsp; %s</p>' % list(tweet_text_set)[0]
             else:
-                msg += '<p>%d similar tweets, similarity=%d%%</p>' % (len(tweet_sets[set_hash]), int(0.5+100.0*len(tweet_sets[set_hash])/matrix_bands))
-            for tweet_text in tweet_text_set:
-#                 tweet_ids = [tweet.key.id() for tweet in tweets if tweet.t == tweet_text]
-#                 msg += '\n    %s' % tweet_ids
-                msg += '<p>&nbsp;&nbsp; %s</p>' % tweet_text
+                msg += '<p>%d similar tweets (%d pair%s)</p>' % (n, n*(n-1)/2, 's' if n>2 else '')
+            similarity = dict()
+            texts = dict()
+            for tweet_text1 in tweet_text_set:
+                tweet_id1 = '%07d' % (int(hashlib.md5(tweet_text1.encode('utf-8')).hexdigest(), 16) % 10000000)
+                for tweet_text2 in tweet_text_set:
+                    tweet_id2 = '%07d' % (int(hashlib.md5(tweet_text2.encode('utf-8')).hexdigest(), 16) % 10000000)
+                    if tweet_id1 < tweet_id2:
+                        sh1 = MatrixRow.shingle_text(tweet_text1, settings.shingle_type)
+                        sh2 = MatrixRow.shingle_text(tweet_text2, settings.shingle_type)
+                        similarity = float(len(sh1 & sh2)) / float(len(sh1 | sh2)) 
+                        msg += '<p>&nbsp;&nbsp; Similarity %d%%</p>' % int(0.5 + 100 * similarity)
+                        msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text1
+                        msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text2
         return msg
-                    
+
     try:
         matrix = Matrix.find(ds_key)
 #     logging.debug(str(matrix))
@@ -321,6 +335,8 @@ def lsh_report(ds_key, duik):
             tweet_sets[set_hash] = tweet_keys
             tweet_set_buckets[set_hash].append(bkt)
     retval = report(tweet_set_buckets, tweet_sets, matrix.bands)
+    if not retval:
+        retval = 'No duplicate tweets found'
     logging.info(retval)
     return retval
             
@@ -334,8 +350,7 @@ class LshTweets(session.BaseRequestHandler):
         Matrix._initialize()
         MatrixRow._initialize()
         matrix = Matrix.create(filename = dui.filename(), 
-                               source = 'tweets', file_key = duik,
-                               rows=5, bands=15, shingle_type='c4', minhash_modulo=7001)
+                               source = 'tweets', file_key = duik)
         ds_key = matrix.ds_key
 
         if matrix:
@@ -349,7 +364,9 @@ class LshTweets(session.BaseRequestHandler):
         duik = session['duik']
         dui = ndb.Key(urlsafe = duik).get() if duik else None
         try:
+            logging.info('LshTweets.show 368 dui %s', dui)
             ds_key = dui.ds_key
+            logging.info('LshTweets.show 370 dui.ds_key %s', ds_key)
             session['lsh_results'] = lsh_report(ds_key, duik)
         except AttributeError: 
             session['lsh_results'] = 'Error has occurred. Staff has been notified.'

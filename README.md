@@ -11,7 +11,7 @@ To familiarize yourself with LSH, please visit the [demo site](http://open-lsh.d
 To try it, you will need a Gmail-based account and a Twitter account. 
  1. Log in using your Google credentials.
  2. Log in using your Twitter credentials.
- 3. Start by pressing the _Get Tweets_ button. It gets the most recent 200 tweets from the Twitter public stream and displaying them.
+ 3. Start by pressing the _Get Tweets_ button. It gets the most recent 200 tweets from the Twitter public stream and displays them.
  4. Press the _Run LSH_ button. It takes about a minute. When the analysis is complete, a _Show duplicate or near-duplicate tweets_ button appears.
  5. Press the _Show duplicate or near-duplicate tweets_ and it shows the tweets that were duplicates or near-duplicates.
 
@@ -32,7 +32,7 @@ A _line format class_ specifies how to parse incoming documents.
 The line format class should specify a static method `parse` which returns a document ID and the text to be used for classification.
 See classes `TweetLine` and `PeerbeltLine` in the code base as examples.
 You may follow the implementation of PeerbeltLine as a template for parsing documents in your implementation &mdash; 
-the original text is HTML and we strip out content between `<script>` and `<style>` tags and also remove other HTML tags before assigning documents to buckets.
+the original text is HTML and we strip out content inside `<script>` and `<style>` tags and also remove other HTML tags before assigning documents to buckets.
 In this case, documents that have the same text but differ only in their markup are considered to be identical.
 
 A _database_ specifies how to interact with the database. `settings.py` specifies which database is being used.
@@ -66,18 +66,17 @@ Changes for your use case
 First, write a line format class for parsing your input data. 
 
 Second, if you are working with a different database than Cassandra or Datastore,
-you will need to write a database driver; we can help with this if you need.
+you will need to write a database driver; we can help with this if required.
 
 A command-line implementation is available in `serial.py`, which may be adapted if you will be running from the command line.
 A web-based implementation is available in `read_tweepy.py`.
 A map-reduce based implementation may be available soon, contact us for details.
 
-The implementation is intended to be compact; we don't store intermediate results (i.e., minhash values) in the database.
+The implementation is intended to be compact in its use of storage; we don't store intermediate results (i.e., minhash values) in the database.
 To compute the similarity of two documents, we need to programmatically compare them. And we do.
 You may wish to make a different trade-off, and uncomment the minhash lines in the implementation of `MatrixRow`.
 
-Some of the LSH parameters are embedded in the `Matrix` constructor. They should be factored into `settings.py`. 
-Some day soon, but until then, you may want to make the changes in the constructor to suit your use case.
+Some of the LSH parameters are embedded in the `Matrix` constructor.
 
 Pull Requests
 -------------
