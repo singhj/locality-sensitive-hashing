@@ -18,7 +18,7 @@ To try it, you will need a Gmail-based account and a Twitter account.
 That is the main idea of LSH: the incoming "Documents" &mdash; tweets in this case &mdash; are assigned to "buckets".
 This can be done as documents come in from the source or all at once, as in the demo.
 The resulting buckets can be examined and identical or similar documents just fall into the same buckets.
-Each document will fall into multiple buckets &mdash; the number is configurable, see the `bands` variable in `Matrix` constructor.
+Each document will fall into multiple buckets.
 It is not a perfect indicator but the number of buckets two documents have in common is suggestive of their similarity (more common buckets = more similarity).   
 
 Architecture
@@ -28,16 +28,16 @@ Central to OpenLSH is a sparse matrix data structure `Matrix`.
 It has as many rows as there are documents and as many columns as there are buckets (up to 2<sup>32</sup> buckets in this implementation).
 A related data structure `MatrixRow` represents a document.
 
-A line format class specifies how to parse incoming documents. 
+A _line format class_ specifies how to parse incoming documents. 
 The line format class should specify a static method `parse` which returns a document ID and the text to be used for classification.
 See classes `TweetLine` and `PeerbeltLine` in the code base as examples.
 You may follow the implementation of PeerbeltLine as a template for parsing documents in your implementation &mdash; 
 the original text is HTML and we strip out content between `<script>` and `<style>` tags and also remove other HTML tags before assigning documents to buckets.
 In this case, documents that have the same text but differ only in their markup are considered to be identical.
 
-A database format class specifies how to interact with the database. `settings.py` specifies which database is being used.
+A _database_ specifies how to interact with the database. `settings.py` specifies which database is being used.
 Implementations are available for Google App Engine Datastore and for Cassandra. 
-An in-memory database based on Python data structures is also available and we find it pretty handy for testing.
+An in-memory database based on Python data structures is also available and it is handy for testing.
 
 Getting Started
 ---------------
