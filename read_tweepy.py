@@ -1,5 +1,6 @@
 import session, time, logging, hashlib
 from collections import defaultdict
+from inspect import currentframe, getframeinfo
 
 import tweepy
 from tweepy import StreamListener
@@ -141,6 +142,8 @@ class DemoUserInfo(ndb.Model):
     ds_key = ndb.StringProperty()
     calculating = ndb.BooleanProperty(default = False)
     calc_done = ndb.BooleanProperty(default = False)
+    tweets = ndb.PickleProperty()
+    calc_stats = ndb.TextProperty()
     def filename(self):
         return 'user_id: {user_id}, email: {email}, nickname: {nickname}, asof: {asof}' \
             .format(asof = self.asof.isoformat()[:19], user_id = self.user_id, email = self.email, nickname = self.nickname)
@@ -193,11 +196,9 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
             # DemoUserInfo
             u = users.get_current_user()
             old_dui = DemoUserInfo.latest_for_user(u)
-            dui = DemoUserInfo(user_id = u.user_id(), email = u.email(), nickname = u.nickname())
+            dui = DemoUserInfo(user_id = u.user_id(), email = u.email(), nickname = u.nickname(), tweets = self.tweets)
             duik = dui.put()
             self.session['duik'] = duik.urlsafe()
-            tweets = [ Tweet(parent = duik, t = t) for t in self.tweets ]
-            keys = ndb.put_multi(tweets)
             if old_dui:
                 old_dui.purge()
                 old_dui.key.delete()
@@ -236,48 +237,69 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
 
 class TweetLine(object):
     @staticmethod
-    def parse(tweet):
-        doc_id = str(tweet.key.id())
-        text = tweet.t
+    def parse(tweet_tuple):
+        doc_id = str(tweet_tuple[0])
+        text = tweet_tuple[1]
         text = text.lower()
+        text = text.replace('http://t.co/','')
         text = ' '.join(text.split())
         return doc_id, text
 
-def lsh_iter(LineFormat, iterator, ds_key):
+def run_lsh(duik, ds_key):
+    def tweets_generator(tweets):
+        line_count = 0
+        while True:
+            try:
+                yield line_count, tweets[line_count]
+                line_count += 1
+            except IndexError:
+                raise StopIteration
+
+    dui = ndb.Key(urlsafe = duik).get() if duik else None
+    
+    logging.info('run_lsh %s', dui)
+    tweets_iterator = tweets_generator(dui.tweets)
+    Matrix._initialize()
     matrix = Matrix.find(ds_key)
-    logging.info('<TextWorker filename={filename}>'\
-        .format(filename = matrix.filename))
 
-    line_count = 0
-    for line in iterator:
-        line_count += 1
-        stats = {}
-        doc_id, text = LineFormat.parse(line)
-        doc = matrix.create_doc(doc_id, text, stats)
-        if 0 == (line_count % 80):
-            logging.debug('<Tweet count %d, id %s, text %s />', line_count, doc_id, text)
-        stats = {}
+    if matrix:
+        all_stats = defaultdict(float)
+        logging.info('<TextWorker filename={filename}>'.format(filename = matrix.filename))
+        tweets_iterator = tweets_generator(dui.tweets)
+        MatrixRow._initialize()
+        matrix = Matrix.create(filename = dui.filename(), source = 'tweets', file_key = duik)
+        ds_key = matrix.ds_key
 
-    logging.info('</TextWorker filename={filename}>'\
-        .format(filename = matrix.filename))
-
-    if matrix.file_key:
-        duik = ndb.Key(urlsafe = matrix.file_key)
-        dui = duik.get()
+        line_count = 0
+        for line in tweets_iterator:
+            stats = {}
+            doc_id, text = TweetLine.parse(line)
+            line_count += 1
+            doc = matrix.create_doc(doc_id, text, stats)
+            if 0 == (line_count % 80):
+                logging.debug('<Tweet count %d, id %s, text %s />', line_count, doc_id, text)
+            for stat in stats:
+                all_stats[stat] += stats[stat]
+            stats = dict()
+    
+        logging.info('</TextWorker filename={filename}, stats={all_stats}>'.format(filename = matrix.filename, all_stats = all_stats))
+    
         dui.ds_key = ds_key
+        dui.calc_stats = str(all_stats)
         dui.calc_done = True
         dui.calculating = False
         dui.put()
 
-def lsh_report(ds_key, duik):
-    def report(tweet_set_buckets, tweet_sets, matrix_bands):
+def lsh_report(duik, ds_key):
+    def report(duik, tweet_set_buckets, tweet_sets, matrix_bands):
 #         logging.info('tweet_set_buckets = %s, \ntweet_sets = %s, \nmatrix_bands = %d',
 #                      tweet_set_buckets, tweet_sets, matrix_bands)
         msg = ''
+        dui = ndb.Key(urlsafe = duik).get()
+        tweets = dui.tweets
         for set_hash in tweet_set_buckets:
-            tweets = ndb.get_multi(tweet_sets[set_hash])
-#             logging.debug('set_hash = %s, tweets = %s', set_hash, tweets)
-            tweet_text_list = [tw.t for tw in tweets]
+            tweet_ids = tweet_sets[set_hash]
+            tweet_text_list = [tweets[twid] for twid in tweet_ids]
             tweet_text_set = set(tweet_text_list)
             max_tweet_len = max([len(t) for t in tweet_text_set])
             if max_tweet_len < 4:
@@ -288,20 +310,34 @@ def lsh_report(ds_key, duik):
                 msg += '<p>%d identical tweets</p>' % n
                 msg += '<p>&nbsp;&nbsp; %s</p>' % list(tweet_text_set)[0]
             else:
-                msg += '<p>%d similar tweets (%d pair%s)</p>' % (n, n*(n-1)/2, 's' if n>2 else '')
-            similarity = dict()
-            texts = dict()
-            for tweet_text1 in tweet_text_set:
-                tweet_id1 = '%07d' % (int(hashlib.md5(tweet_text1.encode('utf-8')).hexdigest(), 16) % 10000000)
-                for tweet_text2 in tweet_text_set:
-                    tweet_id2 = '%07d' % (int(hashlib.md5(tweet_text2.encode('utf-8')).hexdigest(), 16) % 10000000)
-                    if tweet_id1 < tweet_id2:
-                        sh1 = MatrixRow.shingle_text(tweet_text1, settings.shingle_type)
-                        sh2 = MatrixRow.shingle_text(tweet_text2, settings.shingle_type)
-                        similarity = float(len(sh1 & sh2)) / float(len(sh1 | sh2)) 
-                        msg += '<p>&nbsp;&nbsp; Similarity %d%%</p>' % int(0.5 + 100 * similarity)
-                        msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text1
-                        msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text2
+                sub_msg = ''
+                pairs = 0
+                for tweet_text1 in tweet_text_set:
+                    tweet_id1 = '%07d' % (int(hashlib.md5(tweet_text1.encode('utf-8')).hexdigest(), 16) % 10000000)
+                    for tweet_text2 in tweet_text_set:
+                        tweet_id2 = '%07d' % (int(hashlib.md5(tweet_text2.encode('utf-8')).hexdigest(), 16) % 10000000)
+                        if tweet_id1 < tweet_id2:
+#                             frameinfo = getframeinfo(currentframe())
+#                             logging.debug('visiting file %s, line %s', frameinfo.filename, frameinfo.lineno)
+#                             logging.debug('tweet_id pair %s, %s')
+                            (id1, tw1) = TweetLine.parse((0, tweet_text1,))
+                            (id2, tw2) = TweetLine.parse((0, tweet_text2,))
+                            sh1 = MatrixRow.shingle_text(tw1, settings.shingle_type)
+                            sh2 = MatrixRow.shingle_text(tw2, settings.shingle_type)
+                            try:
+                                similarity = float(len(sh1 & sh2)) / float(len(sh1 | sh2))
+                            except ZeroDivisionError:
+                                similarity = 0.0
+                            if similarity < 0.125:
+                                continue
+                            pairs += 1 
+                            sub_msg += '<p>&nbsp;&nbsp; Similarity %d%%</p>' % int(0.5 + 100 * similarity)
+                            sub_msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text1
+                            sub_msg += '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s</p>' % tweet_text2
+                if pairs > 0:
+                    msg += '<p>%d similar tweet pair%s</p>' % (pairs, 's' if pairs > 1 else '')
+                    msg += sub_msg
+                    
         return msg
 
     try:
@@ -328,13 +364,15 @@ def lsh_report(ds_key, duik):
     for bkt in bucket_tweets:
         if len(bucket_tweets[bkt]) > 1:
             tweet_ids = bucket_tweets[bkt]
-#             logging.debug('tweet_ids = %s', tweet_ids)
-            tweet_keys = [ndb.Key(DemoUserInfo, dui_id, Tweet, _id) for _id in tweet_ids]
-            composite_set_key = ''.join(sorted([tk.urlsafe() for tk in tweet_keys]))
+            composite_set_key = '|'.join([str(_id) for _id in sorted(tweet_ids)])
             set_hash = '%07d' % (int(hashlib.md5(composite_set_key).hexdigest(), 16) % 10000000)
-            tweet_sets[set_hash] = tweet_keys
+            tweet_sets[set_hash] = tweet_ids
             tweet_set_buckets[set_hash].append(bkt)
-    retval = report(tweet_set_buckets, tweet_sets, matrix.bands)
+    frameinfo = getframeinfo(currentframe())
+    logging.debug('visiting file %s, line %s', frameinfo.filename, frameinfo.lineno)
+    logging.debug('tweet_sets %s', tweet_sets)
+    logging.debug('tweet_set_buckets %s', tweet_set_buckets)
+    retval = report(duik, tweet_set_buckets, tweet_sets, matrix.bands)
     if not retval:
         retval = 'No duplicate tweets found'
     logging.info(retval)
@@ -346,18 +384,16 @@ class LshTweets(session.BaseRequestHandler):
         duik = session['duik']
         dui = ndb.Key(urlsafe = duik).get() if duik else None
         logging.info('LshTweets %s', dui)
-        tweet_qry = Tweet.query(ancestor = dui.key).fetch()
         Matrix._initialize()
         MatrixRow._initialize()
-        matrix = Matrix.create(filename = dui.filename(), 
-                               source = 'tweets', file_key = duik)
+        matrix = Matrix.create(filename = dui.filename(), source = 'tweets', file_key = duik)
         ds_key = matrix.ds_key
 
         if matrix:
             dui.calc_done = False
             dui.calculating = True
             dui.put()
-            deferred.defer(lsh_iter, TweetLine, tweet_qry, ds_key)
+            deferred.defer(run_lsh, duik, ds_key)
 
     @staticmethod
     def show(session):
@@ -367,21 +403,10 @@ class LshTweets(session.BaseRequestHandler):
             logging.info('LshTweets.show 368 dui %s', dui)
             ds_key = dui.ds_key
             logging.info('LshTweets.show 370 dui.ds_key %s', ds_key)
-            session['lsh_results'] = lsh_report(ds_key, duik)
+            session['lsh_results'] = lsh_report(duik, ds_key)
         except AttributeError: 
             session['lsh_results'] = 'Error has occurred. Staff has been notified.'
             logging.error('LshTweets.show unable to find dui key %s', duik)
-#         ds_key = Matrix.make_new_id(source = 'tweets', filename = str(dui))
-        
-#         deferred.defer(lsh_report, ds_key, dui.key)
-
-#     def get(self):
-#         LshTweets.calc_lsh_results(self.session)
-#         self.redirect('/')
-# 
-#     def post(self):
-#         LshTweets.calc_lsh_results(self.session)
-#         self.redirect('/')
 
 urls = [
      ('/twitter_login', TwitterLogin),
