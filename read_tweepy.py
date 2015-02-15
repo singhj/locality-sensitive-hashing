@@ -1,4 +1,4 @@
-import session, time, logging, hashlib
+import session, time, logging, hashlib, json
 from collections import defaultdict
 from inspect import currentframe, getframeinfo
 
@@ -17,7 +17,7 @@ from lsh_matrix import *
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
 DEFAULT_NUM_TWEETS = 200
-REPORT_AFTER_COUNT = 40
+TWEET_BATCH_SIZE = 40
 
 class TwitterStatusListener(StreamListener):
 
@@ -140,13 +140,43 @@ class DemoUserInfo(ndb.Model):
     email = ndb.StringProperty()
     nickname = ndb.StringProperty()
     ds_key = ndb.StringProperty()
-    calculating = ndb.BooleanProperty(default = False)
+    calculating = ndb.IntegerProperty(default = 0)
     calc_done = ndb.BooleanProperty(default = False)
     tweets = ndb.PickleProperty()
     calc_stats = ndb.TextProperty()
     def filename(self):
         return 'user_id: {user_id}, email: {email}, nickname: {nickname}, asof: {asof}' \
             .format(asof = self.asof.isoformat()[:19], user_id = self.user_id, email = self.email, nickname = self.nickname)
+    @staticmethod
+    @ndb.transactional
+    def initiate_calculating_task(duikey):
+        ent = duikey.get()
+        if 0 == ent.calculating:
+            ent.calc_stats = json.dumps(dict())
+        ent.calculating += 1
+        ent.calc_done = False
+        ent.put()
+        return ent
+    @staticmethod
+    @ndb.transactional
+    def wrapup_calculating_task(duikey, batch_stats):
+        ent = duikey.get()
+        logging.debug('<wrapup_calculating_task %d %s %s>', ent.calculating, duikey, batch_stats)
+        ent.calculating -= 1
+#         logging.debug('%d', ent.calculating)
+        if 0 == ent.calculating:
+            ent.calc_done = True
+        logging.debug('%s %s', ent.calc_done, ent.calc_stats)
+        calc_stats = json.loads(ent.calc_stats)
+        for stat in batch_stats:
+            if stat not in calc_stats.keys():
+                calc_stats[stat] = 0.0
+            calc_stats[stat] += batch_stats[stat]
+        ent.calc_stats = json.dumps(calc_stats)
+        logging.debug('%s', ent.calc_stats)
+        ent.put()
+        logging.debug('</wrapup_calculating_task %d %s %s>', ent.calculating, ent.calc_done, ent.calc_stats)
+        return ent
     @classmethod
     def latest_for_user(cls, user):
         if not user:
@@ -184,7 +214,7 @@ class TwitterReadNode(TwitterGetTweets, PipeNode):
     def GetNext(self):
         if self.cursor < self.count:
             tweet = self.tweets[self.cursor]
-            if 0 == (self.cursor % REPORT_AFTER_COUNT):
+            if 0 == (self.cursor % TWEET_BATCH_SIZE):
                 logging.info('TwitterReadNode.GetNext (%d) = %s', self.cursor, tweet)
             self.cursor += 1
             return tweet
@@ -245,30 +275,30 @@ class TweetLine(object):
         text = ' '.join(text.split())
         return doc_id, text
 
-def run_lsh(duik, ds_key):
-    def tweets_generator(tweets):
-        line_count = 0
-        while True:
+def run_lsh(duik, ds_key, offset, number):
+    def tweets_generator(tweets, offset, number):
+        line_count = offset
+        while line_count < offset+number:
             try:
                 yield line_count, tweets[line_count]
                 line_count += 1
             except IndexError:
                 raise StopIteration
 
-    dui = ndb.Key(urlsafe = duik).get() if duik else None
+    duikey = ndb.Key(urlsafe = duik)
+    dui = duikey.get()
     
     logging.info('run_lsh %s', dui)
-    tweets_iterator = tweets_generator(dui.tweets)
+    tweets_iterator = tweets_generator(dui.tweets, offset, number)
     Matrix._initialize()
     matrix = Matrix.find(ds_key)
 
     if matrix:
         all_stats = defaultdict(float)
-        logging.info('<TextWorker filename={filename}>'.format(filename = matrix.filename))
-        tweets_iterator = tweets_generator(dui.tweets)
+        logging.info('<TextWorker filename={filename} offset={offset}>'.format(filename = matrix.filename, offset = offset))
+        tweets_iterator = tweets_generator(dui.tweets, offset, number)
         MatrixRow._initialize()
         matrix = Matrix.create(filename = dui.filename(), source = 'tweets', file_key = duik)
-        ds_key = matrix.ds_key
 
         line_count = 0
         for line in tweets_iterator:
@@ -276,19 +306,17 @@ def run_lsh(duik, ds_key):
             doc_id, text = TweetLine.parse(line)
             line_count += 1
             doc = matrix.create_doc(doc_id, text, stats)
-            if 0 == (line_count % 80):
+            if 0 == (line_count % TWEET_BATCH_SIZE):
                 logging.debug('<Tweet count %d, id %s, text %s />', line_count, doc_id, text)
             for stat in stats:
                 all_stats[stat] += stats[stat]
             stats = dict()
     
-        logging.info('</TextWorker filename={filename}, stats={all_stats}>'.format(filename = matrix.filename, all_stats = all_stats))
+        logging.info('</TextWorker filename={filename} offset={offset} stats={batch_stats}>'\
+                     .format(filename = matrix.filename, offset = offset, batch_stats = all_stats))
     
-        dui.ds_key = ds_key
-        dui.calc_stats = str(all_stats)
-        dui.calc_done = True
-        dui.calculating = False
-        dui.put()
+        DemoUserInfo.wrapup_calculating_task(duikey, all_stats)
+
 
 def lsh_report(duik, ds_key):
     def report(duik, tweet_set_buckets, tweet_sets, matrix_bands):
@@ -368,10 +396,10 @@ def lsh_report(duik, ds_key):
             set_hash = '%07d' % (int(hashlib.md5(composite_set_key).hexdigest(), 16) % 10000000)
             tweet_sets[set_hash] = tweet_ids
             tweet_set_buckets[set_hash].append(bkt)
-    frameinfo = getframeinfo(currentframe())
-    logging.debug('visiting file %s, line %s', frameinfo.filename, frameinfo.lineno)
-    logging.debug('tweet_sets %s', tweet_sets)
-    logging.debug('tweet_set_buckets %s', tweet_set_buckets)
+#     frameinfo = getframeinfo(currentframe())
+#     logging.debug('visiting file %s, line %s', frameinfo.filename, frameinfo.lineno)
+#     logging.debug('tweet_sets %s', tweet_sets)
+#     logging.debug('tweet_set_buckets %s', tweet_set_buckets)
     retval = report(duik, tweet_set_buckets, tweet_sets, matrix.bands)
     if not retval:
         retval = 'No duplicate tweets found'
@@ -382,8 +410,9 @@ class LshTweets(session.BaseRequestHandler):
     @staticmethod
     def calc(session):
         duik = session['duik']
-        dui = ndb.Key(urlsafe = duik).get() if duik else None
-        logging.info('LshTweets %s', dui)
+        duikey = ndb.Key(urlsafe = duik)
+        dui = duikey.get() if duik else None
+        logging.info('Calculate LshTweets %s', dui)
         Matrix._initialize()
         MatrixRow._initialize()
         matrix = Matrix.create(filename = dui.filename(), source = 'tweets', file_key = duik)
@@ -391,18 +420,19 @@ class LshTweets(session.BaseRequestHandler):
 
         if matrix:
             dui.calc_done = False
-            dui.calculating = True
+            dui.ds_key = ds_key
             dui.put()
-            deferred.defer(run_lsh, duik, ds_key)
+            # We kick off a bunch of tasks to process the tweets in parallel
+            for offset in xrange(0, DEFAULT_NUM_TWEETS, TWEET_BATCH_SIZE):
+                DemoUserInfo.initiate_calculating_task(duikey)
+                deferred.defer(run_lsh, duik, ds_key, offset, TWEET_BATCH_SIZE)
 
     @staticmethod
     def show(session):
         duik = session['duik']
         dui = ndb.Key(urlsafe = duik).get() if duik else None
         try:
-            logging.info('LshTweets.show 368 dui %s', dui)
             ds_key = dui.ds_key
-            logging.info('LshTweets.show 370 dui.ds_key %s', ds_key)
             session['lsh_results'] = lsh_report(duik, ds_key)
         except AttributeError: 
             session['lsh_results'] = 'Error has occurred. Staff has been notified.'
