@@ -1,7 +1,9 @@
 {% extends "base.html" %}
     {% block meta %}
-        {% if calculating %}
-            <meta http-equiv="refresh" content="15" />
+        {% if fetching %}
+            <meta http-equiv="refresh" content="2" />
+        {% elif calculating %}
+            <meta http-equiv="refresh" content="12" />
         {% endif %}
     {% endblock meta %}
 
@@ -13,25 +15,29 @@
         <h3>A framework for classifying similar objects together, eliminating duplicates and near-duplicates</h3>
       </div>
 
-    {% if google_logged_in %}
+  {% if google_logged_in %}
+    {% if app_is_closed %}
+    <div class="row"><div class="span8">
+        <h1>We&rsquo;ll be back soon!</h1>
+        <p>Sorry for the inconvenience but we&rsquo;re performing some maintenance at the moment. 
+        If you need to you can always contact us, otherwise we&rsquo;ll be back online shortly!</p>
+        <p>&mdash; The OpenLSH Team</p>
+    </div></div>
+    {% else %}
       {% if tw_auth %}
         <div class="row">
           <div class="span4">
             <form action="/twitter_read_node" method="post">
                 <input type="submit" value="Get Tweets">
             </form>
-            <p>{{ tw_status|safe }}</p>
+            <p>{{ tw_banner|safe }}</p>
           </div>
           <div class="span4">
-        {% if fetched %}
-            <form action="/" method="post">
-                <input type="hidden" name="command" id="command" value="calc_lsh">
-                <input type="submit" value="Run LSH">
-            </form>
             {% if calculating %}
-                <p>Calculating LSH Buckets</p>
+              <p>Calculating LSH Buckets</p>
+            {% else %}
+              <p></p>
             {% endif %}
-        {% endif %}
           </div>
           <div class="span4">
         {% if calc_done %}
@@ -40,7 +46,7 @@
                 <input type="submit" value="Show duplicate or near-duplicate tweets">
             </form>
             {% if showing_lsh_results %}
-                <a href="#" onclick="goBack()" />Go Back</a><br />
+                <a href="#" onclick="goBack()" />Go Back</a><br />          
             {% endif %}
         {% endif %}
       </div>
@@ -49,17 +55,23 @@
 
       {% if tw_auth %}
         <hr />
-        <p>&mdash; {{ display|safe }}</p>
+        <p>{{ headline|safe }}</p>
+          {% if showing_lsh_results %}
+            <hr width="36%">
+            <p>These tweets were not similar to anything else in this set</p>
+          {% endif %}
+        <p>&mdash; {{ tweet_display|safe }}</p>
         <br />
         <form action="/twitter_logout" method="post">
             <input type="submit" value="Log out of twitter">
         </form>
       {% else %}
-        <p>Please log into Twitter to be able to get tweets</p>
-           <form action="/twitter_login" method="post">
-               <input type="submit" value="Log Into Twitter">
-           </form>
+        <p>Log into Twitter to get tweets</p>
+        <form action="/twitter_login" method="post">
+            <input type="submit" value="Log Into Twitter">
+        </form>
       {% endif %}
     {% endif %}
-    <a href="{{ url|safe }}">{{ url_linktext }}</a>
-    {% endblock main_content %}
+  {% endif %}
+  <a href="{{ url|safe }}">{{ url_linktext }}</a>
+{% endblock main_content %}

@@ -37,18 +37,6 @@ class Matrix(object):
 
     def __init__(self):
         return
-        qry = "SELECT * FROM {name} WHERE ds_key=?".format(name = self.__class__.__name__)
-        self.select = session.prepare(qry)
-        self.select.consistency_level = ConsistencyLevel.QUORUM
-        doc = MatrixRow(name = MatrixRow.__class__.__name__, attrs = MatrixRow.attrs, p_keys = MatrixRow.p_keys)
-        self.doc_query = "SELECT * FROM MatrixRow WHERE ds_key=? AND doc_id=?"
-        self.doc_select = session.prepare(self.doc_query)
-        self.bkt_query = "SELECT buckets FROM MatrixRow WHERE ds_key=? AND doc_id=?"
-        self.bkt_select = session.prepare(self.bkt_query)
-        self.nns_query = "SELECT doc_id, minhashes FROM MatrixRow WHERE ds_key=? AND buckets CONTAINS ?"
-        self.nns_select = session.prepare(self.nns_query)
-        self.doc_ids_query = "SELECT doc_id FROM MatrixRow WHERE ds_key=? ALLOW FILTERING"
-        self.doc_ids_select = session.prepare(self.doc_ids_query)
 
     @classmethod
     def get(cls, ds_key):
@@ -109,12 +97,12 @@ class Matrix(object):
                shingle_type = settings.shingle_type, 
                minhash_modulo = settings.minhash_modulo):
 
-        logging.debug('Matrix.create cls = %s, vars = %s', cls, vars(cls))
+#         logging.debug('Matrix.create cls = %s, vars = %s', cls, vars(cls))
         Matrix._initialize()
 
-        logging.debug('Matrix.create inputs %s, %s, %s', source, filename, file_key)        
+#         logging.debug('Matrix.create inputs %s, %s, %s', source, filename, file_key)        
         ds_key = cls.make_new_id(source, filename)
-        logging.debug('Matrix.create ds_key %s', ds_key)        
+#         logging.debug('Matrix.create ds_key %s', ds_key)
 
         max_hashes = rows * bands
         data = {
@@ -130,7 +118,7 @@ class Matrix(object):
                 }
         Matrix.insert_row(data = data)
         matrix = Matrix.find(ds_key)
-        logging.debug('Matrix.create returning %s', matrix)
+#         logging.debug('Matrix.create returning %s', matrix)
         return matrix
 
     def str(self):

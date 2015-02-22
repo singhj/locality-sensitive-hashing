@@ -42,7 +42,7 @@ class Table(type):
                 (name, typ) = tuple(attr.split())
                 attrs[name] = copy.copy(datastore_type[typ])
             StorageProxy = type(cls.__name__, (ndb.Model,), attrs)
-            logging.info('Creating class %s with attributes %s', cls.__name__, attrs)
+
             setattr(cls._instances[cls], 'StorageProxy', StorageProxy)
             setattr(cls._instances[cls], 'attrs', kwds['attrs'])
             setattr(cls._instances[cls], 'p_keys', kwds['p_keys'])
