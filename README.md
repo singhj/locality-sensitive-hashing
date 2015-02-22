@@ -11,15 +11,14 @@ To familiarize yourself with LSH, please visit the [demo site](http://open-lsh.d
 To try it, you will need a Gmail-based account and a Twitter account. 
  1. Log in using your Google credentials.
  2. Log in using your Twitter credentials.
- 3. Start by pressing the _Get Tweets_ button. It gets the most recent 200 tweets from the Twitter public stream and displays them.
- 4. Press the _Run LSH_ button. It takes about a minute. When the analysis is complete, a _Show duplicate or near-duplicate tweets_ button appears.
- 5. Press the _Show duplicate or near-duplicate tweets_ and it shows the tweets that were duplicates or near-duplicates.
+ 3. Start by pressing the _Get Tweets_ button. It gets the most recent 600 tweets from the Twitter public stream and displays them. It also begins LSH analysis on chunks of tweets as they arrive.
+ 4. Once the analysis is complete, a _Show duplicate or near-duplicate tweets_ button appears. It shows the tweets that were duplicates or near-duplicates.
 
 That is the main idea of LSH: the incoming "Documents" &mdash; tweets in this case &mdash; are assigned to "buckets".
-This can be done as documents come in from the source or all at once, as in the demo.
+This can be done as documents come in from the source, as implemented in the demo.
 The resulting buckets can be examined and identical or similar documents just fall into the same buckets.
 Each document will fall into multiple buckets.
-It is not a perfect indicator but the number of buckets two documents have in common is suggestive of their similarity (more common buckets = more similarity).   
+We examine buckets that have multiple documents in them and report on the ones that have a high degree of [Jaccard similarity](http://en.wikipedia.org/wiki/Jaccard_index) of their [4-gram character shingles](http://en.wikipedia.org/wiki/N-gram).
 
 Architecture
 ------------
