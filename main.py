@@ -71,6 +71,7 @@ class MainPage(session.BaseRequestHandler):
             tw_logged_in = self.session['tw_logged_in']
         except: pass
 
+        tw_banner = ''
         if tw_logged_in:
             tw_banner = 'Ready for Tweets'
         tweet_display = ''
