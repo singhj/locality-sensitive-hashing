@@ -98,7 +98,7 @@ class MainPage(session.BaseRequestHandler):
             read_tweepy.LshTweets.show(self.session)
             similar_sets, same_sets, accounted_ids  = self.session['lsh_results']
         frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s %s %s', frameinfo.filename, frameinfo.lineno+1, similar_sets)
+        logging.info('file %s, line %s %s %s', frameinfo.filename, frameinfo.lineno+1, similar_sets, same_sets)
             
         try:
             if command == 'show_lsh_results':

@@ -309,24 +309,11 @@ def lsh_report(duik, ds_key):
         def set_pair_report(tweet_text_dict, ttdk1, ttdk2, sim):
             """ report one tweet or maybe a bunch of identical ones """
             def quotify(string):
-                retval = string.replace('"', '\\"')
+                retval = string.replace('"', '\\"').replace('\n',' ')
                 return retval
             div_id = '%s-%s' % (tweet_text_dict[ttdk1][0], tweet_text_dict[ttdk2][0])
             psim = pair_similarity(div_id, quotify(ttdk1), quotify(ttdk2), sim)
             return psim
-#             frameinfo = getframeinfo(currentframe())
-#             logging.debug('visiting file %s, line %s, div_id %s', frameinfo.filename, frameinfo.lineno+1, div_id)
-#             frameinfo = getframeinfo(currentframe())
-#             logging.debug('visiting file %s, line %s,ttdks %r %r', frameinfo.filename, frameinfo.lineno+1, ttdk1, ttdk2)
-#             script = """
-#                 <script type="text/javascript">
-#                     var para = document.createElement("p");
-#                     para.innerHTML = diffString({tweet1!r},{tweet2!r});
-#                     var element = document.getElementById("{div}");
-#                     element.appendChild(para);
-#                 </script>
-#             """.format(tweet1 = quotify(ttdk1), tweet2 = quotify(ttdk2), div = div_id)
-#             logging.warning('script %s', script)
 
         msg_same = ''
         similar_sets = []

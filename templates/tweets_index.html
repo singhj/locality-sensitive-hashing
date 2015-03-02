@@ -6,6 +6,19 @@
             <meta http-equiv="refresh" content="16" />
         {% endif %}
     <script src="../assets/js/diff_match_patch.js"></script>
+	<SCRIPT TYPE="text/javascript" LANGUAGE="JavaScript">
+	function show_diff(text1, text2) {
+		// Adapted from http://code.google.com/p/google-diff-match-patch/
+	  var dmp = new diff_match_patch();
+	  dmp.Diff_Timeout = 10.0;
+	  dmp.Diff_EditCost = 4.0;
+	
+	  var d = dmp.diff_main(text1, text2);
+	  dmp.diff_cleanupSemantic(d);
+	  var ds = dmp.diff_prettyHtml(d);
+	  return ds
+	}
+	</SCRIPT>
     {% endblock meta %}
 
     {% block main_content %}
@@ -49,7 +62,13 @@
           </div>
           <div class="span4">
         {% if calc_done %}
-            <p id="div1">Showing similar or same tweets</p><br />
+            <p id="div1">Showing similar or same tweets<br/>
+              <script TYPE="text/javascript" LANGUAGE="JavaScript">
+              var text1 = "(Similar tweets highlight subtractions like this)";
+              var text2 = "(Similar tweets highlight additions like this)";
+                document.write(show_diff(text1,text2));
+              </script></p>
+            <br />
         {% endif %}
       </div>
     </div>
@@ -66,8 +85,11 @@
             <p><b>{{ similar_set|length }} pairs</b></p>
             {% for similar_pair in similar_set %}
               <p><i>{{ similar_pair.sim }}% similarity</i></p>
-              <p>{{ similar_pair.text1|safe }}</p>
-              <p>{{ similar_pair.text2|safe }}</p>
+              <!--  <p>{{ similar_pair.text1|safe }}</p>
+              <p>{{ similar_pair.text2|safe }}</p> -->
+              <p><script TYPE="text/javascript" LANGUAGE="JavaScript">
+                document.write(show_diff("{{ similar_pair.text1|safe }}", "{{ similar_pair.text2|safe }}"));
+              </script></p>
             {% endfor %}
         {% endfor %}
         <hr width="36%">
