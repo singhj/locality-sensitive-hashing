@@ -1,10 +1,11 @@
 {% extends "base.html" %}
     {% block meta %}
         {% if fetching %}
-            <meta http-equiv="refresh" content="2" />
+            <meta http-equiv="refresh" content="4" />
         {% elif calculating %}
-            <meta http-equiv="refresh" content="12" />
+            <meta http-equiv="refresh" content="16" />
         {% endif %}
+    <script src="../assets/js/diff_match_patch.js"></script>
     {% endblock meta %}
 
     {% block main_content %}
@@ -30,9 +31,13 @@
       {% if tw_auth %}
         <div class="row">
           <div class="span4">
+            {% if fetching %}
+              <p>Fetching Tweets</p>
+            {% else %}
             <form action="/twitter_read_node" method="post">
                 <input type="submit" value="Get Tweets">
             </form>
+            {% endif %}
             <p>{{ tw_banner|safe }}</p>
           </div>
           <div class="span4">
@@ -44,26 +49,38 @@
           </div>
           <div class="span4">
         {% if calc_done %}
-            <form action="/" method="post">
-                <input type="hidden" name="command" id="command" value="show_lsh_results">
-                <input type="submit" value="Show duplicate or near-duplicate tweets">
-            </form>
-            {% if showing_lsh_results %}
-                <a href="#" onclick="goBack()" />Go Back</a><br />          
-            {% endif %}
+            <p id="div1">Showing similar or same tweets</p><br />
         {% endif %}
+      </div>
+    </div>
+    <div class="row">
+      <div class="span7">
+        <ul style="list-style-type:square;">
+            {% for tweet in tweets %}
+                <li>{{ tweet|safe }}</li>
+            {% endfor %}
+        </ul>
+      </div>
+      <div class="span5">
+        {% for similar_set in similar_sets %}
+            <p><b>{{ similar_set|length }} pairs</b></p>
+            {% for similar_pair in similar_set %}
+              <p><i>{{ similar_pair.sim }}% similarity</i></p>
+              <p>{{ similar_pair.text1|safe }}</p>
+              <p>{{ similar_pair.text2|safe }}</p>
+            {% endfor %}
+        {% endfor %}
+        <hr width="36%">
+        {% for same_set in same_sets %}
+            <p><b>{{ same_set[0] }} identical tweets</b></p>
+            <p>{{ same_set[1]|safe }}</p>
+        {% endfor %}
       </div>
     </div>
     {% endif %}
 
       {% if tw_auth %}
         <hr />
-        <p>{{ headline|safe }}</p>
-          {% if showing_lsh_results %}
-            <hr width="36%">
-            <p>These tweets were not similar to anything else in this set</p>
-          {% endif %}
-        <p>&mdash; {{ tweet_display|safe }}</p>
         <br />
         <form action="/twitter_logout" method="post">
             <input type="submit" value="Log out of twitter">

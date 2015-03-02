@@ -13,8 +13,7 @@ JINJA_ENVIRONMENT = jinja2.Environment(
 
 import read_tweepy
 
-class AppOpenLSH(ndb.Model):
-    is_open = ndb.IntegerProperty(default = 1)
+from models import *
 
 class MainPage(session.BaseRequestHandler):
 
@@ -37,6 +36,9 @@ class MainPage(session.BaseRequestHandler):
         
         app_is_closed = False
         u = users.get_current_user()
+        if u:
+            demo_user = DemoUser.get_or_insert(u.user_id(), email = u.email(), nickname = u.nickname())
+
         ulogged = 'User not logged in' if not u else 'User is %s' % u.nickname()
         app_status = 'App is Open' if app_is_open else "App is Closed"
         if u and u.user_id() == '108492098862327080451':
@@ -74,12 +76,13 @@ class MainPage(session.BaseRequestHandler):
         tw_banner = ''
         if tw_logged_in:
             tw_banner = 'Ready for Tweets'
+        tweets = []
         tweet_display = ''
         if not app_is_closed:
             duik = lookup(self.session, 'duik')
             dui = ndb.Key(urlsafe = duik).get() if duik else None
             if not dui:
-                dui = read_tweepy.DemoUserInfo.latest_for_user( u )
+                dui = DemoUserInteraction.latest_for_user( u )
                 self.session['duik'] = dui.key.urlsafe() if dui else None
             if dui:
                 tweets = dui.tweets
@@ -88,10 +91,17 @@ class MainPage(session.BaseRequestHandler):
         else:
             dui = None
 
-        headline = ''
+        similar_sets, same_sets, accounted_ids = ([], [], [])
+        frameinfo = getframeinfo(currentframe())
+        logging.info('file %s, line %s %s', frameinfo.filename, frameinfo.lineno+1, similar_sets)
+        if lookup(dui, 'calc_done'):
+            read_tweepy.LshTweets.show(self.session)
+            similar_sets, same_sets, accounted_ids  = self.session['lsh_results']
+        frameinfo = getframeinfo(currentframe())
+        logging.info('file %s, line %s %s %s', frameinfo.filename, frameinfo.lineno+1, similar_sets)
+            
         try:
             if command == 'show_lsh_results':
-                headline = self.session['lsh_results'][0]
 #                 matched_tweets = [tweets[twid] for twid in range(len(tweets)) if twid     in self.session['lsh_results'][1]]
                 other_tweets   = [tweets[twid] for twid in range(len(tweets)) if twid not in self.session['lsh_results'][1]]
                 tweet_display = '<br/>\n&mdash; '.join(other_tweets)
@@ -104,12 +114,12 @@ class MainPage(session.BaseRequestHandler):
             'url_linktext': url_linktext,
             'tw_auth': tw_auth,
             'tw_banner': tw_banner,
-            'headline': headline,
-            'tweet_display': tweet_display,
+            'similar_sets': similar_sets,
+            'same_sets': same_sets,
+            'tweets': tweets,
             'fetching': lookup(dui, 'fetching'),
             'calculating': lookup(dui, 'calculating'),
             'calc_done': lookup(dui, 'calc_done'),
-            'showing_lsh_results': command == 'show_lsh_results',
             'gaCode': settings.gaCode,
         }
 
@@ -117,7 +127,7 @@ class MainPage(session.BaseRequestHandler):
         try:
             self.response.write(template.render(template_values))
         except UnicodeDecodeError:
-            template_values['tweets'] = 'unreadable content'
+            template_values['tweets'] = ['unreadable content']
             self.response.write(template.render(template_values))
     def post(self):
         cmd = self.request.get('command')

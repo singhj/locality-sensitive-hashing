@@ -11,107 +11,13 @@ from google.appengine.api import users
 from google.appengine.ext import ndb
 
 from utils.deferred import deferred
-from pipe_node import *
+from models import *
 from lsh_matrix import *
 
 APP_KEY = twitter_settings.consumer_key
 APP_SECRET = twitter_settings.consumer_secret
 DEFAULT_NUM_TWEETS = 600
 TWEET_BATCH_SIZE = 40
-
-class DemoUserInfo(ndb.Model):
-    asof = ndb.DateTimeProperty(auto_now_add=True)
-    user_id = ndb.StringProperty()
-    email = ndb.StringProperty()
-    nickname = ndb.StringProperty()
-    ds_key = ndb.StringProperty()
-    fetching = ndb.IntegerProperty(default = 0)
-    calculating = ndb.IntegerProperty(default = 0)
-    calc_done = ndb.BooleanProperty(default = False)
-    tweets = ndb.PickleProperty(default = [])
-    calc_stats = ndb.TextProperty()
-
-    def filename(self):
-        return 'user_id: {user_id}, email: {email}, nickname: {nickname}, asof: {asof}' \
-            .format(asof = self.asof.isoformat()[:19], user_id = self.user_id, email = self.email, nickname = self.nickname)
-
-    @ndb.transactional
-    def indicate_fetch_begun(self):
-        key = self.key
-        ent = key.get()
-        ent.fetching += 1
-        ent.put()
-        return ent
-
-    @ndb.transactional
-    def indicate_fetch_ended(self):
-        key = self.key
-        ent = key.get()
-        ent.fetching -= 1
-        ent.put()
-        return ent
-
-    @ndb.transactional
-    def indicate_calc_begun(self):
-        key = self.key
-        ent = key.get()
-        if 0 == ent.calculating:
-            ent.calc_stats = json.dumps(dict())
-        ent.calculating += 1
-        ent.calc_done = False
-        ent.put()
-        return ent
-
-    @ndb.transactional
-    def indicate_calc_ended(self, batch_stats):
-        key = self.key
-        ent = key.get()
-        ent.calculating -= 1
-#         logging.debug('%d', self.calculating)
-        if 0 == ent.calculating:
-            ent.calc_done = True
-        calc_stats = json.loads(ent.calc_stats)
-        for stat in batch_stats:
-            if stat not in calc_stats.keys():
-                calc_stats[stat] = 0.0
-            calc_stats[stat] += batch_stats[stat]
-        ent.calc_stats = json.dumps(calc_stats)
-        ent.put()
-        logging.info('<indicate_calc_ended %d %s %s/>', ent.calculating, ent.calc_done, ent.calc_stats)
-        return ent
-    
-    @ndb.transactional
-    def extend_tweets(self, tweets):
-        key = self.key
-        ent = key.get()
-        ent.tweets.extend(tweets)
-        ent.put()
-        return ent
-
-    @ndb.transactional
-    def set_ds_key(self, ds_key):
-        key = self.key
-        ent = key.get()
-        if not ent.ds_key:
-            ent.ds_key = ds_key
-            ent.put()
-        else:
-            if ds_key != ent.ds_key:
-                logging.error('changing ds_key from %s to %s? Makes no sense!', ent.ds_key, ds_key)
-        return ent
-
-    @classmethod
-    def latest_for_user(cls, user):
-        if not user:
-            return None
-        dui = cls.query(cls.user_id == user.user_id()).order(-cls.asof).get()
-        return dui
-
-    def purge(self):
-        if self.ds_key:
-            matrix = Matrix.find(ds_key = self.ds_key)
-            if matrix:
-                matrix.purge()
 
 def get_tweets(authkey, authsec, duik, old_duik):
     frameinfo = getframeinfo(currentframe())
@@ -271,7 +177,7 @@ class TwitterCallback(session.BaseRequestHandler):
 
 class TwitterAgent(session.BaseRequestHandler):
     def get(self):
-        logging.info('TwitterAgent.get()')
+        logging.error('TwitterAgent.get()')
         self.post()
 
     def post(self):
@@ -294,10 +200,22 @@ class TwitterAgent(session.BaseRequestHandler):
                 raise NotLoggedIn("Not logged in into twitter")
             
             u = users.get_current_user()
-            old_dui = DemoUserInfo.latest_for_user(u)
-            old_duik = old_dui.key.urlsafe()
+            frameinfo = getframeinfo(currentframe())
+            logging.info('file %s, line %s, user_id %s', frameinfo.filename, frameinfo.lineno+1, u.user_id())
+            old_dui = DemoUserInteraction.latest_for_user(u)
+            frameinfo = getframeinfo(currentframe())
+            logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
+            if old_dui:
+                frameinfo = getframeinfo(currentframe())
+                logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
+                old_duik = old_dui.key.urlsafe()
+            else:
+                old_duik = None
 
-            dui = DemoUserInfo(user_id = u.user_id(), email = u.email(), nickname = u.nickname())
+            frameinfo = getframeinfo(currentframe())
+            logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
+            demo_user_key = ndb.Key(DemoUser, u.user_id())
+            dui = DemoUserInteraction(parent = demo_user_key)
             duikey = dui.put()
             self.session['duik'] = duikey.urlsafe()
             frameinfo = getframeinfo(currentframe())
@@ -307,15 +225,6 @@ class TwitterAgent(session.BaseRequestHandler):
             deferred.defer(get_tweets, authkey, authsec, self.session['duik'], old_duik)
             ################################
             self.redirect('/')
-#             ################################
-#             got_tweets = TwitterStatusListener.get_tweets(authkey, authsec, self.session['duik'], old_duik)
-#             ################################
-#             frameinfo = getframeinfo(currentframe())
-#             logging.info('file %s, line %s got_tweets %s', frameinfo.filename, frameinfo.lineno+1, len(got_tweets))
-#             dui = duikey.get()
-#             self.session['tweets'] = dui.tweets
-#             logging.info('TwitterAgent completed, NumTweets = %d', len(self.session['tweets']))
-#             self.redirect('/')
         
         except:
             frameinfo = getframeinfo(currentframe())
@@ -381,6 +290,13 @@ def run_lsh(duik, tweets, ds_key, offset, timestamp):
         logging.error('Matrix %s not found, file %s, line %s', dui.filename(), frameinfo.filename, frameinfo.lineno+1)
         return
 
+class pair_similarity(object):
+    def __init__(self, div, text1, text2, sim):
+        self.div = div
+        self.text1 = text1
+        self.text2 = text2
+        self.sim = sim
+
 def lsh_report(duik, ds_key):
 
     def report(duik, tweet_set_buckets, tweet_sets, matrix_bands):
@@ -390,9 +306,31 @@ def lsh_report(duik, ds_key):
             num_identicals = len(tweet_text_dict[ttdk])
             rpt_identicals = '' if (num_identicals == 1) else (' (%d identical)' % num_identicals)
             return '<p>&nbsp;&nbsp;&nbsp;&nbsp; %s%s</p>' % (ttdk, rpt_identicals)
+        def set_pair_report(tweet_text_dict, ttdk1, ttdk2, sim):
+            """ report one tweet or maybe a bunch of identical ones """
+            def quotify(string):
+                retval = string.replace('"', '\\"')
+                return retval
+            div_id = '%s-%s' % (tweet_text_dict[ttdk1][0], tweet_text_dict[ttdk2][0])
+            psim = pair_similarity(div_id, quotify(ttdk1), quotify(ttdk2), sim)
+            return psim
+#             frameinfo = getframeinfo(currentframe())
+#             logging.debug('visiting file %s, line %s, div_id %s', frameinfo.filename, frameinfo.lineno+1, div_id)
+#             frameinfo = getframeinfo(currentframe())
+#             logging.debug('visiting file %s, line %s,ttdks %r %r', frameinfo.filename, frameinfo.lineno+1, ttdk1, ttdk2)
+#             script = """
+#                 <script type="text/javascript">
+#                     var para = document.createElement("p");
+#                     para.innerHTML = diffString({tweet1!r},{tweet2!r});
+#                     var element = document.getElementById("{div}");
+#                     element.appendChild(para);
+#                 </script>
+#             """.format(tweet1 = quotify(ttdk1), tweet2 = quotify(ttdk2), div = div_id)
+#             logging.warning('script %s', script)
 
         msg_same = ''
-        msg_similar = ''
+        similar_sets = []
+        same_sets = []
         dui = ndb.Key(urlsafe = duik).get()
         tweets = dui.tweets
         accounted_ids = list()
@@ -410,11 +348,10 @@ def lsh_report(duik, ds_key):
             if len(tweet_text_dict.keys()) == 1:
                 accounted_ids.extend(tweet_ids)
                 for ttdk in tweet_text_dict:
-                    msg_same += '<p>%d identical</p>' % len(tweet_ids)
-                    msg_same += '<p>&nbsp;&nbsp; %s</p>' % ttdk
+                    same_sets.append((len(tweet_ids), ttdk,))
             else:
-                sub_msg = ''
-                pairs = 0
+#                 sub_msg = ''
+                similar_set = []
                 for ttdk1 in tweet_text_dict:
                     for ttdk2 in tweet_text_dict:
                         if ttdk1 < ttdk2:
@@ -431,17 +368,14 @@ def lsh_report(duik, ds_key):
                                 similarity = 0.0
                             if similarity < 0.125:
                                 continue
-                            pairs += 1 
                             accounted_ids.extend(tweet_text_dict[ttdk1])
                             accounted_ids.extend(tweet_text_dict[ttdk2])
-                            sub_msg += '<p>&nbsp;&nbsp; Similarity %d%%</p>' % int(0.5 + 100 * similarity)
-                            sub_msg += set_line_report(tweet_text_dict, ttdk1)
-                            sub_msg += set_line_report(tweet_text_dict, ttdk2)
-                if pairs > 0:
-                    msg_similar += '<p>%d similar pair%s</p>' % (pairs, 's' if pairs > 1 else '')
-                    msg_similar += sub_msg
+                            div_id = '%s-%s' % (tweet_text_dict[ttdk1][0], tweet_text_dict[ttdk2][0])
+                            similar_set.append(set_pair_report(tweet_text_dict, ttdk1, ttdk2, int(0.5 + 100 * similarity)))
+                if len(similar_set) > 0:
+                    similar_sets.append(similar_set)
                     
-        return msg_similar+msg_same, set(accounted_ids)
+        return similar_sets, same_sets, set(accounted_ids)
 
     try:
         matrix = Matrix.find(ds_key)
@@ -472,11 +406,8 @@ def lsh_report(duik, ds_key):
             tweet_sets[set_hash] = tweet_ids
             tweet_set_buckets[set_hash].append(bkt)
 
-    retval, accounted_ids = report(duik, tweet_set_buckets, tweet_sets, matrix.bands)
-    if not retval:
-        retval = 'No duplicate tweets found'
-    logging.info(retval)
-    return retval, accounted_ids
+    similar_sets, same_sets, accounted_ids = report(duik, tweet_set_buckets, tweet_sets, matrix.bands)
+    return similar_sets, same_sets, accounted_ids
             
 class LshTweets(session.BaseRequestHandler):
     @staticmethod
