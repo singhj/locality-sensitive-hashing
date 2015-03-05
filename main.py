@@ -33,6 +33,13 @@ class MainPage(session.BaseRequestHandler):
         this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
         app_is_open = this_app.is_open
         frameinfo = getframeinfo(currentframe())
+        logging.info('file %s, line %s app_is_open, %s', frameinfo.filename, frameinfo.lineno+1, app_is_open)
+        tw_logged_in = False
+        if this_app.twitter_access_token_key:
+            tw_logged_in = True
+            self.session['tw_logged_in'] = True
+            self.session['auth.access_token.key'] = this_app.twitter_access_token_key
+            self.session['auth.access_token.secret'] = this_app.twitter_access_token_secret
         
         app_is_closed = False
         u = users.get_current_user()
@@ -41,7 +48,7 @@ class MainPage(session.BaseRequestHandler):
 
         ulogged = 'User not logged in' if not u else 'User is %s' % u.nickname()
         app_status = 'App is Open' if app_is_open else "App is Closed"
-        if u and u.user_id() == '108492098862327080451':
+        if users.is_current_user_admin():
             frameinfo = getframeinfo(currentframe())
             logging.info('file %s, line %s Admin User, %s', frameinfo.filename, frameinfo.lineno+1, app_status)
             url = users.create_logout_url(self.request.uri)
@@ -63,16 +70,6 @@ class MainPage(session.BaseRequestHandler):
             url_linktext = 'Google Logout'
             app_is_closed = not app_is_open
         
-        tw_auth = False
-        try:
-            tw_auth = self.session['tw_auth']
-        except: pass
-
-        tw_logged_in = False
-        try:
-            tw_logged_in = self.session['tw_logged_in']
-        except: pass
-
         tw_banner = ''
         if tw_logged_in:
             tw_banner = 'Ready for Tweets'
@@ -112,7 +109,7 @@ class MainPage(session.BaseRequestHandler):
             'google_logged_in': u,
             'url': url,
             'url_linktext': url_linktext,
-            'tw_auth': tw_auth,
+            'tw_logged_in': tw_logged_in,
             'tw_banner': tw_banner,
             'similar_sets': similar_sets,
             'same_sets': same_sets,

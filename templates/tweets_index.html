@@ -41,7 +41,7 @@
         <p>&mdash; The OpenLSH Team</p>
     </div></div>
     {% else %}
-      {% if tw_auth %}
+      {% if tw_logged_in %}
         <div class="row">
           <div class="span4">
             {% if fetching %}
@@ -101,14 +101,10 @@
     </div>
     {% endif %}
 
-      {% if tw_auth %}
+      {% if tw_logged_in %}
         <hr />
         <br />
-        <form action="/twitter_logout" method="post">
-            <input type="submit" value="Log out of twitter">
-        </form>
       {% else %}
-        <p>Log into Twitter to get tweets</p>
         <form action="/twitter_login" method="post">
             <input type="submit" value="Log Into Twitter">
         </form>

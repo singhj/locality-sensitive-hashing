@@ -14,16 +14,13 @@ from utils.deferred import deferred
 from models import *
 from lsh_matrix import *
 
-APP_KEY = twitter_settings.consumer_key
-APP_SECRET = twitter_settings.consumer_secret
 DEFAULT_NUM_TWEETS = 600
 TWEET_BATCH_SIZE = 40
 
-def get_tweets(authkey, authsec, duik, old_duik):
-    frameinfo = getframeinfo(currentframe())
-    logging.info('file %s, line %s auth %s %s', frameinfo.filename, frameinfo.lineno+1, authkey, authsec)
-    auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
-    auth.set_access_token(authkey, authsec)
+def get_tweets(duik, old_duik):
+    this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
+    auth = tweepy.OAuthHandler(this_app.twitter_consumer_key, this_app.twitter_consumer_secret)
+    auth.set_access_token(this_app.twitter_access_token_key, this_app.twitter_access_token_secret)
     api = tweepy.API(auth)
     listen = TwitterStatusListener(duik, old_duik, auth)
     stream = tweepy.Stream(auth, listen)
@@ -47,7 +44,7 @@ class TwitterStatusListener(StreamListener):
         self.matrix = None
 
         frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s auth %s duik, %s', frameinfo.filename, frameinfo.lineno+1, auth, duik)
+        logging.debug('file %s, line %s auth %s duik, %s', frameinfo.filename, frameinfo.lineno+1, auth, duik)
 
     def on_connect(self):
         """Called once connected to streaming server.
@@ -58,9 +55,10 @@ class TwitterStatusListener(StreamListener):
         self.tweets = list()
         self.cursor = 0
         dui = ndb.Key(urlsafe = self.duik).get()
-        dui.indicate_fetch_begun()
+        if dui:
+            dui.indicate_fetch_begun()
         frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s Twitter connection ready', frameinfo.filename, frameinfo.lineno+1)
+        logging.debug('file %s, line %s Twitter connection ready', frameinfo.filename, frameinfo.lineno+1)
 
     def launch_lsh_calc(self):
         # store tweets and kick off run_lsh
@@ -101,11 +99,13 @@ class TwitterStatusListener(StreamListener):
             return False # this should trigger closing the connection
 
     def on_error(self, status_code):
-        logging.info('Error: ' + str(status_code) + "\n")
+        frameinfo = getframeinfo(currentframe())
+        logging.error('file %s, line %s Twitter Error %s', frameinfo.filename, frameinfo.lineno+1, str(status_code))
         return False
 
     def on_timeout(self):
-        logging.info("Timeout, sleeping for 60 seconds...\n")
+        frameinfo = getframeinfo(currentframe())
+        logging.warning('file %s, line %s Twitter Timeout sleep(60)', frameinfo.filename, frameinfo.lineno+1)
         time.sleep(60)
         return
     
@@ -116,17 +116,22 @@ class TwitterStatusListener(StreamListener):
             old_dui.purge()
             old_dui.key.delete()
         dui = ndb.Key(urlsafe = self.duik).get()
-        dui.indicate_fetch_ended()
+        if dui:
+            dui.indicate_fetch_ended()
 
 class TwitterLogin(session.BaseRequestHandler):
     def get(self):
-        auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
+        this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
+        if not this_app.twitter_consumer_key:
+            this_app = this_app.twitter_consumer(twitter_settings.consumer_key, twitter_settings.consumer_secret)
+#         this_app = this_app.twitter_access_token()
+        auth = tweepy.OAuthHandler(this_app.twitter_consumer_key, this_app.twitter_consumer_secret)
         # Redirect user to Twitter to authorize
         url = auth.get_authorization_url()
-        logging.info("TwitterLogin url=%s", url)
+        logging.debug("TwitterLogin url=%s", url)
         self.session['request_token_key'] = auth.request_token.key
         self.session['request_token_secret'] = auth.request_token.secret
-        logging.info('request_token_key %s, request_token_secret %s',  self.session['request_token_key'], self.session['request_token_secret'])
+        logging.debug('request_token_key %s, request_token_secret %s',  self.session['request_token_key'], self.session['request_token_secret'])
         self.redirect(url)
 
     def post(self):
@@ -134,7 +139,10 @@ class TwitterLogin(session.BaseRequestHandler):
 
 class TwitterLogout(session.BaseRequestHandler):
     def get(self):
-        self.session['tw_auth'] = None
+        if users.is_current_user_admin():
+            this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
+            this_app.twitter_access_token()
+            self.session['tw_logged_in'] = False
         self.redirect('/')
         return
 
@@ -158,78 +166,71 @@ class TwitterCallback(session.BaseRequestHandler):
         rqst = self.request
         verifier = rqst.get('oauth_verifier')
 
-        auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
+        this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
+        auth = tweepy.OAuthHandler(this_app.twitter_consumer_key, this_app.twitter_consumer_secret)
         auth.set_request_token(self.session['request_token_key'], self.session['request_token_secret'])
 
         try:
             auth.get_access_token(verifier)
             self.session['auth.access_token.key'] = auth.access_token.key
             self.session['auth.access_token.secret'] = auth.access_token.secret
+
+            this_app.twitter_access_token(auth.access_token.key, auth.access_token.secret)
+            self.session['tw_logged_in'] = True
+            self.session['tweets'] = []
+
             frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s auth %s %s', frameinfo.filename, frameinfo.lineno+1, auth.access_token.key, auth.access_token.secret)
+            logging.debug('file %s, line %s auth %s %s', frameinfo.filename, frameinfo.lineno+1, auth.access_token.key, auth.access_token.secret)
         except tweepy.TweepError:
             logging.error('Error! Failed to get access token.')
         
-        self.session['tw_auth'] = auth
-        self.session['tweets'] = []
-        self.session['tw_logged_in'] = True
         self.redirect('/')
 
 class TwitterAgent(session.BaseRequestHandler):
-    def get(self):
-        logging.error('TwitterAgent.get()')
-        self.post()
-
     def post(self):
-        logging.info('TwitterAgent.post()')
         try:
-            logging.info('TwitterAgent have twitter token: %s', 'yes' if 'tw_auth' in self.session else 'no')
-            if not ('tw_auth' in self.session):
-                logging.error('Not logged in into twitter')
-                raise NotLoggedIn("Not logged in into twitter")
-#             auth = self.session['tw_auth']
-            auth = tweepy.OAuthHandler(APP_KEY, APP_SECRET)
-            authkey, authsec = (self.session['auth.access_token.key'], self.session['auth.access_token.secret'],)
-            auth.set_access_token(authkey, authsec)
+            this_app = AppOpenLSH.get_or_insert('KeyOpenLSH')
+            auth = tweepy.OAuthHandler(this_app.twitter_consumer_key, this_app.twitter_consumer_secret)
+            auth.set_access_token(this_app.twitter_access_token_key, this_app.twitter_access_token_secret)
             api = tweepy.API(auth)
-            self.session['tw_auth'] = auth
-            if not api:
+            if api:
+                self.session['tw_logged_in'] = True
+#                 this_app.twitter_access_token_key = self.session['auth.access_token.key']
+#                 this_app.twitter_access_token_secret = self.session['auth.access_token.secret']
+#                 this_app.put()
+            else:
                 logging.error('API not found')
                 self.session['tw_logged_in'] = False
-                self.session['tw_auth'] = None
+                this_app.twitter_access_token()
+
                 raise NotLoggedIn("Not logged in into twitter")
             
             u = users.get_current_user()
-            frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s, user_id %s', frameinfo.filename, frameinfo.lineno+1, u.user_id())
+
             old_dui = DemoUserInteraction.latest_for_user(u)
-            frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
             if old_dui:
-                frameinfo = getframeinfo(currentframe())
-                logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
                 old_duik = old_dui.key.urlsafe()
             else:
                 old_duik = None
 
-            frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
             demo_user_key = ndb.Key(DemoUser, u.user_id())
             dui = DemoUserInteraction(parent = demo_user_key)
             duikey = dui.put()
-            self.session['duik'] = duikey.urlsafe()
-            frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s auth %s %s', frameinfo.filename, frameinfo.lineno+1, authkey, authsec)
+            self.session['duik'] = duikey.urlsafe() if dui else None
+
+            authkey = this_app.twitter_access_token_key
+            authsec = this_app.twitter_access_token_secret
+#             frameinfo = getframeinfo(currentframe())
+#             logging.info('file %s, line %s auth %s %s', frameinfo.filename, frameinfo.lineno+1, authkey, authsec)
     
             ################################
-            deferred.defer(get_tweets, authkey, authsec, self.session['duik'], old_duik)
+            deferred.defer(get_tweets, self.session['duik'], old_duik)
             ################################
             self.redirect('/')
         
         except:
             frameinfo = getframeinfo(currentframe())
-            logging.info('file %s, line %s Exception', frameinfo.filename, frameinfo.lineno+1)
-            self.session['tw_auth'] = None
+            logging.error('file %s, line %s Exception', frameinfo.filename, frameinfo.lineno+1)
             self.redirect('/')
             return
         
@@ -271,7 +272,7 @@ def run_lsh(duik, tweets, ds_key, offset, timestamp):
     if matrix:
         dui = dui.indicate_calc_begun()
         all_stats = defaultdict(float)
-        logging.info('<TextWorker filename={filename} tweets received so far={count}>'\
+        logging.debug('<TextWorker filename={filename} tweets received so far={count}>'\
                      .format(filename = matrix.filename, count = len(dui.tweets)))
         line_count = 0
         for line in tweets_iterator:
@@ -282,7 +283,7 @@ def run_lsh(duik, tweets, ds_key, offset, timestamp):
             for stat in stats:
                 all_stats[stat] += stats[stat]
             stats = dict()
-        logging.info('</TextWorker filename={filename} stats={batch_stats}>'\
+        logging.debug('</TextWorker filename={filename} stats={batch_stats}>'\
                      .format(filename = matrix.filename, batch_stats = all_stats))
         dui = dui.indicate_calc_ended(all_stats)
     else:
@@ -382,7 +383,7 @@ def lsh_report(duik, ds_key):
         for bkt in matrix_row.buckets:
             bucket_tweets[bkt].append(int(matrix_row.doc_id))
     bkt_count = len(bucket_tweets.keys())
-    logging.info('LshTweets %s for %d rows has %d buckets', dui, row_count, bkt_count)
+    logging.debug('LshTweets %s for %d rows has %d buckets', dui, row_count, bkt_count)
     tweet_sets = {}
     tweet_set_buckets = defaultdict(list)
     for bkt in bucket_tweets:

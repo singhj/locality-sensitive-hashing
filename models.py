@@ -2,9 +2,32 @@ import logging, json
 from inspect import currentframe, getframeinfo
 from google.appengine.ext import ndb
 from lsh_matrix import *
+import twitter_settings
 
 class AppOpenLSH(ndb.Model):
-    is_open = ndb.IntegerProperty(default = 1)
+    is_open = ndb.IntegerProperty(default = 1, indexed = False)
+    twitter_consumer_key = ndb.StringProperty(default = '', indexed = False)
+    twitter_consumer_secret = ndb.StringProperty(default = '', indexed = False)
+    twitter_access_token_key = ndb.StringProperty(default = '', indexed = False)
+    twitter_access_token_secret = ndb.StringProperty(default = '', indexed = False)
+
+    @ndb.transactional
+    def twitter_consumer(self, k='', sec=''):
+        key = self.key
+        ent = key.get()
+        ent.twitter_consumer_key = k
+        ent.twitter_consumer_secret = sec
+        ent.put()
+        return ent
+
+    @ndb.transactional
+    def twitter_access_token(self, k='', sec=''):
+        key = self.key
+        ent = key.get()
+        ent.twitter_access_token_key = k
+        ent.twitter_access_token_secret = sec
+        ent.put()
+        return ent
 
 class DemoUser(ndb.Model):
     email = ndb.StringProperty()
