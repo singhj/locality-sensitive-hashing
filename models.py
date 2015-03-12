@@ -32,6 +32,8 @@ class AppOpenLSH(ndb.Model):
 class DemoUser(ndb.Model):
     email = ndb.StringProperty()
     nickname = ndb.StringProperty()
+    created = ndb.DateTimeProperty(auto_now_add=True)
+    updated = ndb.DateTimeProperty(auto_now=True)
 
 class DemoUserInteraction(ndb.Model):
     asof = ndb.DateTimeProperty(auto_now_add=True)
