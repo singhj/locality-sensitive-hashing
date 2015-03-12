@@ -226,6 +226,17 @@ class TwitterAgent(session.BaseRequestHandler):
             ################################
             deferred.defer(get_tweets, self.session['duik'], old_duik)
             ################################
+            start = time.time()
+            fetching = False
+            for i in xrange(5):
+                time.sleep((1+i)**2) # Time for the fetches to get going, exponential back off
+                dui = dui.refresh()
+                if dui.fetching:
+                    fetching = True
+                    logging.info('Fetch began within %6.2f seconds, proceeding...', time.time()-start)
+                    break
+            if not fetching:
+                logging.error('Fetch did not begin within %6.2f seconds, ???', time.time()-start)
             self.redirect('/')
         
         except:

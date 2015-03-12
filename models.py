@@ -46,6 +46,14 @@ class DemoUserInteraction(ndb.Model):
         return 'user_id: {user_id}, asof: {asof}'.format(asof = self.asof.isoformat()[:19], user_id = self.key.parent().id())
 
     @ndb.transactional
+    def refresh(self):
+        key = self.key
+        ent = key.get()
+        ent.fetching += 0
+        ent.put()
+        return ent
+
+    @ndb.transactional
     def indicate_fetch_begun(self):
         key = self.key
         ent = key.get()
@@ -114,14 +122,8 @@ class DemoUserInteraction(ndb.Model):
     def latest_for_user(user):
         if not user:
             return None
-        frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s, user_id %s', frameinfo.filename, frameinfo.lineno+1, user.user_id())
         demo_user_key = ndb.Key(DemoUser, user.user_id())
-        frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
         dui = DemoUserInteraction.query(ancestor=demo_user_key).order(-DemoUserInteraction.asof).get()
-        frameinfo = getframeinfo(currentframe())
-        logging.info('file %s, line %s', frameinfo.filename, frameinfo.lineno+1)
         return dui
 
     def purge(self):
