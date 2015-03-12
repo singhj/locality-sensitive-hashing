@@ -214,6 +214,9 @@ class TwitterAgent(session.BaseRequestHandler):
                 old_duik = None
 
             demo_user_key = ndb.Key(DemoUser, u.user_id())
+            demo_user = demo_user_key.get()
+            demo_user = demo_user.refresh()
+
             dui = DemoUserInteraction(parent = demo_user_key)
             duikey = dui.put()
             self.session['duik'] = duikey.urlsafe() if dui else None

@@ -34,6 +34,12 @@ class DemoUser(ndb.Model):
     nickname = ndb.StringProperty()
     created = ndb.DateTimeProperty(auto_now_add=True)
     updated = ndb.DateTimeProperty(auto_now=True)
+    @ndb.transactional
+    def refresh(self):
+        key = self.key
+        ent = key.get()
+        ent.put()
+        return ent
 
 class DemoUserInteraction(ndb.Model):
     asof = ndb.DateTimeProperty(auto_now_add=True)
